@@ -76,4 +76,6 @@ fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8) !void
     const lua_type = lua.getField(state, -1, "homepage");
     std.debug.print("type = {t}\n", .{lua_type});
     std.debug.print("{s}\n", .{lua.toLString(state, -1)});
+
+    lua.remove(state, -1);
 }

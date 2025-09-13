@@ -89,6 +89,9 @@ fn checkError(state: *State, rc: c_int) !void {
     }
 }
 
+///Pushes onto the stack the value t[k], where t is the value at the given index.
+///As in Lua, this function may trigger a metamethod for the "index" event (see §2.4).
+//Returns the type of the pushed value.
 pub fn getField(state: *State, idx: isize, field: [:0]const u8) LuaType {
     return @enumFromInt(c.lua_getfield(state, @intCast(idx), field));
 }
@@ -114,3 +117,5 @@ pub fn toLString(state: *State, idx: isize) []const u8 {
     slice.len = len;
     return slice;
 }
+
+pub const remove = c.lua_remove;
