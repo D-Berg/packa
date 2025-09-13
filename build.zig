@@ -4,6 +4,29 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const lua_dep = b.dependency("lua", .{});
+    const lua_lib = b.addLibrary(.{
+        .name = "lua",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+        .linkage = .static,
+    });
+
+    lua_lib.root_module.addCSourceFiles(.{
+        .root = lua_dep.path("src"),
+        .files = lua_src_files,
+    });
+    lua_lib.addIncludePath(lua_dep.path("src"));
+
+    const translate_lua = b.addTranslateC(.{
+        .root_source_file = b.path("include.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_lua.addIncludePath(lua_dep.path("src"));
+
     const exe = b.addExecutable(.{
         .name = "packa",
         .root_module = b.createModule(.{
@@ -35,3 +58,38 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_test.step);
 }
+
+const lua_src_files = &.{
+    "lapi.c",
+    "lcode.c",
+    "lctype.c",
+    "ldebug.c",
+    "ldo.c",
+    "ldump.c",
+    "lfunc.c",
+    "lgc.c",
+    "llex.c",
+    "lmem.c",
+    "lobject.c",
+    "lopcodes.c",
+    "lparser.c",
+    "lstate.c",
+    "lstring.c",
+    "ltable.c",
+    "ltm.c",
+    "lundump.c",
+    "lvm.c",
+    "lzio.c",
+    "lauxlib.c",
+    "lbaselib.c",
+    "lcorolib.c",
+    "ldblib.c",
+    "liolib.c",
+    "lmathlib.c",
+    "loadlib.c",
+    "loslib.c",
+    "lstrlib.c",
+    "ltablib.c",
+    "lutf8lib.c",
+    "linit.c",
+};
