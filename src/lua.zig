@@ -119,3 +119,6 @@ pub fn toLString(state: *State, idx: isize) []const u8 {
 }
 
 pub const remove = c.lua_remove;
+
+///Pops n elements from the stack.
+pub const pop = c.lua_pop;

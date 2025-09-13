@@ -73,9 +73,40 @@ fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8) !void
     try lua.loadString(state, script);
     try lua.pcallk(state);
 
-    const lua_type = lua.getField(state, -1, "homepage");
-    std.debug.print("type = {t}\n", .{lua_type});
-    std.debug.print("{s}\n", .{lua.toLString(state, -1)});
+    switch (lua.getField(state, -1, "homepage")) {
+        .string => {
+            std.debug.print("{s}\n", .{lua.toLString(state, -1)});
+        },
+        else => return error.UnexecpectedLuaType,
+    }
 
-    lua.remove(state, -1);
+    lua.pop(state, 1);
+
+    _ = lua.getField(state, -1, "prebuilt");
+    _ = lua.getField(state, -1, "url");
+
+    const url = lua.toLString(state, -1);
+
+    var client = std.http.Client{ .allocator = arena };
+    defer client.deinit();
+
+    var alloc_writer = std.Io.Writer.Allocating.init(arena);
+
+    const res = try client.fetch(.{
+        .response_writer = &alloc_writer.writer,
+        .location = .{ .url = url },
+    });
+
+    if (res.status == .ok) {
+        var save_file = try std.fs.cwd().createFile("zig.tar.xz", .{});
+        defer save_file.close();
+
+        var file_write_buf: [1024]u8 = undefined;
+        var file_writer = save_file.writer(&file_write_buf);
+
+        try file_writer.interface.writeAll(alloc_writer.writer.buffered());
+        try file_writer.interface.flush();
+    }
+
+    lua.pop(state, 2);
 }
