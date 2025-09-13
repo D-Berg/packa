@@ -1,7 +1,17 @@
 const std = @import("std");
 const builtin = @import("builtin");
+
+const util = @import("util.zig");
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 const log = std.log;
+
+var stdout_buf: [1024]u8 = undefined;
+var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+const stdout = &stdout_writer.interface;
+
+var stderr_buf: [1024]u8 = undefined;
+var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
+const stderr = &stderr_writer.interface;
 
 pub fn main() !void {
     const gpa, const is_debug = gpa: {
@@ -28,6 +38,21 @@ pub fn main() !void {
         std.debug.print("editor = {s}\n", .{editor});
     } else {
         log.err("couldnt find editor env var\n", .{});
+    }
+
+    const args = try std.process.argsAlloc(arena);
+
+    const parsed_args = try util.parseArgs(args[1..]);
+    switch (parsed_args) {
+        .usage => |usage| {
+            try stdout.print("{s}", .{usage});
+            try stdout.flush();
+        },
+        .install => {},
+        .err_msg => |err_msg| {
+            try stderr.print("{s}", .{err_msg});
+            try stderr.flush();
+        },
     }
 
     std.debug.print("hello world\n", .{});
