@@ -29,12 +29,12 @@ pub fn main() !void {
 
     const arena = arena_impl.allocator();
 
-    var env_map = std.process.getEnvMap(arena) catch |err| {
+    var env = std.process.getEnvMap(arena) catch |err| {
         log.err("Could not get env map: {t}", .{err});
         return err;
     };
 
-    if (env_map.get("EDITOR")) |editor| {
+    if (env.get("EDITOR")) |editor| {
         std.debug.print("editor = {s}\n", .{editor});
     } else {
         log.err("couldnt find editor env var\n", .{});
@@ -42,18 +42,22 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(arena);
 
-    const parsed_args = try util.parseArgs(args[1..]);
+    const parsed_args = try util.parseArgs(arena, args[1..]);
     switch (parsed_args) {
         .usage => |usage| {
             try stdout.print("{s}", .{usage});
             try stdout.flush();
         },
-        .install => {},
+        .install => |install| {
+            try install.execute(gpa, env);
+        },
         .err_msg => |err_msg| {
-            try stderr.print("{s}", .{err_msg});
+            try stderr.print("error: {s}\n", .{err_msg});
             try stderr.flush();
         },
+        .help => |help| {
+            try stdout.print("{s}\n", .{help});
+            try stdout.flush();
+        },
     }
-
-    std.debug.print("hello world\n", .{});
 }
