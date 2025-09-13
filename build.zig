@@ -36,6 +36,9 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    exe.root_module.linkLibrary(lua_lib);
+    exe.root_module.addImport("c", translate_lua.createModule());
+
     b.installArtifact(exe);
 
     const run_exe = b.addRunArtifact(exe);
