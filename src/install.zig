@@ -3,11 +3,9 @@ const Allocator = std.mem.Allocator;
 const log = std.log;
 const c = @import("c");
 const lua = @import("lua.zig");
+const InstallArgs = @import("util.zig").InstallArgs;
 
-package_names: []const []const u8,
-
-const Install = @This();
-pub fn execute(self: *const Install, gpa: Allocator, env: std.process.EnvMap) !void {
+pub fn install(gpa: Allocator, args: InstallArgs, env: std.process.EnvMap) !void {
     var arena_impl: std.heap.ArenaAllocator = .init(gpa);
     defer arena_impl.deinit();
 
@@ -32,7 +30,7 @@ pub fn execute(self: *const Install, gpa: Allocator, env: std.process.EnvMap) !v
     };
     defer dir.close();
 
-    for (self.package_names) |name| {
+    for (args.package_names) |name| {
         try installPackage(gpa, dir, name);
     }
 }
@@ -82,31 +80,37 @@ fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8) !void
 
     lua.pop(state, 1);
 
-    _ = lua.getField(state, -1, "prebuilt");
-    _ = lua.getField(state, -1, "url");
-
-    const url = lua.toLString(state, -1);
-
-    var client = std.http.Client{ .allocator = arena };
-    defer client.deinit();
-
-    var alloc_writer = std.Io.Writer.Allocating.init(arena);
-
-    const res = try client.fetch(.{
-        .response_writer = &alloc_writer.writer,
-        .location = .{ .url = url },
-    });
-
-    if (res.status == .ok) {
-        var save_file = try std.fs.cwd().createFile("zig.tar.xz", .{});
-        defer save_file.close();
-
-        var file_write_buf: [1024]u8 = undefined;
-        var file_writer = save_file.writer(&file_write_buf);
-
-        try file_writer.interface.writeAll(alloc_writer.writer.buffered());
-        try file_writer.interface.flush();
+    switch (lua.getField(state, -1, "fetch")) {
+        .function => {
+            std.debug.print("fetch is a function\n", .{});
+            try lua.pcallk(state);
+        },
+        else => return error.WrongLuaType,
     }
-
-    lua.pop(state, 2);
+    // _ = lua.getField(state, -1, "url");
+    //
+    // const url = lua.toLString(state, -1);
+    //
+    // var client = std.http.Client{ .allocator = arena };
+    // defer client.deinit();
+    //
+    // var alloc_writer = std.Io.Writer.Allocating.init(arena);
+    //
+    // const res = try client.fetch(.{
+    //     .response_writer = &alloc_writer.writer,
+    //     .location = .{ .url = url },
+    // });
+    //
+    // if (res.status == .ok) {
+    //     var save_file = try std.fs.cwd().createFile("zig.tar.xz", .{});
+    //     defer save_file.close();
+    //
+    //     var file_write_buf: [1024]u8 = undefined;
+    //     var file_writer = save_file.writer(&file_write_buf);
+    //
+    //     try file_writer.interface.writeAll(alloc_writer.writer.buffered());
+    //     try file_writer.interface.flush();
+    // }
+    //
+    // lua.pop(state, 2);
 }

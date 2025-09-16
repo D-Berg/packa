@@ -1,17 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const actions = @import("actions.zig");
 
 const util = @import("util.zig");
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 const log = std.log;
-
-var stdout_buf: [1024]u8 = undefined;
-var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-const stdout = &stdout_writer.interface;
-
-var stderr_buf: [1024]u8 = undefined;
-var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
-const stderr = &stderr_writer.interface;
+const stdout = util.stdout;
+const stderr = util.stderr;
 
 pub fn main() !void {
     const gpa, const is_debug = gpa: {
@@ -48,8 +43,8 @@ pub fn main() !void {
             try stdout.print("{s}", .{usage});
             try stdout.flush();
         },
-        .install => |install| {
-            try install.execute(gpa, env);
+        .install => |install_args| {
+            try actions.install(gpa, install_args, env);
         },
         .err_msg => |err_msg| {
             try stderr.print("error: {s}\n", .{err_msg});

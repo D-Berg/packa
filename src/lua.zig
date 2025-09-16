@@ -77,6 +77,7 @@ pub fn loadString(state: *State, string: [:0]const u8) error{LuaError}!void {
     try checkError(state, rc);
 }
 
+// TODO: add args
 pub fn pcallk(state: *State) !void {
     const rc = c.lua_pcallk(state, 0, c.LUA_MULTRET, 0, 0, null);
     try checkError(state, rc);
