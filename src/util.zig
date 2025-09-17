@@ -10,6 +10,10 @@ var stderr_buf: [1024]u8 = undefined;
 var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
 pub const stderr = &stderr_writer.interface;
 
+var stdin_buf: [64]u8 = undefined;
+var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+pub const stdin = &stdin_reader.interface;
+
 pub const Argument = union(enum) {
     install: InstallArgs,
     usage: []const u8,

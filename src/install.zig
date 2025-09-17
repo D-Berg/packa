@@ -1,9 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const log = std.log;
 const c = @import("c");
 const lua = @import("lua.zig");
-const InstallArgs = @import("util.zig").InstallArgs;
+const util = @import("util.zig");
+const InstallArgs = util.InstallArgs;
+const log = std.log;
+const stdout = util.stdout;
+const stdin = util.stdin;
 
 pub fn install(gpa: Allocator, args: InstallArgs, env: std.process.EnvMap) !void {
     var arena_impl: std.heap.ArenaAllocator = .init(gpa);
@@ -61,7 +64,23 @@ fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8) !void
         break :blk try alloc_writer.toOwnedSliceSentinel(0);
     };
 
-    log.debug("{s}", .{script});
+    // review and approve package script
+    try stdout.print("The following script will be run:\n", .{});
+    try stdout.print("{s}", .{script});
+    try stdout.print("Do you want to run it, Y/N?: ", .{});
+    try stdout.flush();
+
+    var questioned: usize = 0;
+    while (questioned < 3) : (questioned += 1) {
+        const answer = try stdin.takeDelimiterExclusive('\n');
+        if (std.mem.eql(u8, answer, "N")) return;
+        if (std.mem.eql(u8, answer, "Y")) break;
+
+        try stdout.print("Do you want to run it, Y/N?: ", .{});
+        try stdout.flush();
+    } else {
+        return;
+    }
 
     const state = try lua.newStateAlloc(gpa);
     defer lua.close(state);
@@ -84,6 +103,18 @@ fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8) !void
         .function => {
             std.debug.print("fetch is a function\n", .{});
             try lua.pcallk(state);
+        },
+        .table => {
+            switch (lua.getField(state, -1, "url")) {
+                .string => {
+                    const url = lua.toLString(state, -1);
+                    log.info("fetching {s}", .{url});
+                },
+                else => {
+                    log.err("url field needs to be either a string", .{});
+                    return error.LuaError;
+                },
+            }
         },
         else => return error.WrongLuaType,
     }
