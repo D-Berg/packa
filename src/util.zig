@@ -40,6 +40,7 @@ fn parseInstallArgs(arena: Allocator, args: []const []const u8) !Argument {
         return .{ .err_msg = "no arguments passed to install cmd" };
     }
 
+    // FIX: arg parsing flags
     for (args) |arg| {
         if (std.mem.eql(u8, arg, "-h")) {
             return .{ .help = "packa install <formula1> <formula2> ..." };

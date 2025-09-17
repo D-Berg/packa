@@ -64,7 +64,7 @@ fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8, appro
         break :blk try alloc_writer.toOwnedSliceSentinel(0);
     };
 
-    if (approved) {
+    if (!approved) {
         // review and approve package script
         try stdout.print("The following script will be run:\n", .{});
         try stdout.print("{s}", .{script});
