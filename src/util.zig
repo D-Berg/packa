@@ -34,6 +34,8 @@ pub fn parseArgs(arena: Allocator, args: []const []const u8) !Argument {
 
 fn parseInstallArgs(arena: Allocator, args: []const []const u8) !Argument {
     _ = arena;
+
+    var approved = false;
     if (args.len == 0) {
         return .{ .err_msg = "no arguments passed to install cmd" };
     }
@@ -42,13 +44,18 @@ fn parseInstallArgs(arena: Allocator, args: []const []const u8) !Argument {
         if (std.mem.eql(u8, arg, "-h")) {
             return .{ .help = "packa install <formula1> <formula2> ..." };
         }
+
+        if (std.mem.eql(u8, arg, "-y") or std.mem.eql(u8, arg, "--yes")) {
+            approved = true;
+        }
     }
 
-    return .{ .install = .{ .package_names = args } };
+    return .{ .install = .{ .package_names = args, .approved = approved } };
 }
 
 pub const InstallArgs = struct {
     package_names: []const []const u8,
+    approved: bool = false,
 };
 
 pub const usage =

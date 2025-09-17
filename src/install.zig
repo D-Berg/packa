@@ -34,11 +34,11 @@ pub fn install(gpa: Allocator, args: InstallArgs, env: std.process.EnvMap) !void
     defer dir.close();
 
     for (args.package_names) |name| {
-        try installPackage(gpa, dir, name);
+        try installPackage(gpa, dir, name, args.approved);
     }
 }
 
-fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8) !void {
+fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8, approved: bool) !void {
     var arena_impl = std.heap.ArenaAllocator.init(gpa);
     defer arena_impl.deinit();
 
@@ -64,22 +64,24 @@ fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8) !void
         break :blk try alloc_writer.toOwnedSliceSentinel(0);
     };
 
-    // review and approve package script
-    try stdout.print("The following script will be run:\n", .{});
-    try stdout.print("{s}", .{script});
-    try stdout.print("Do you want to run it, Y/N?: ", .{});
-    try stdout.flush();
-
-    var questioned: usize = 0;
-    while (questioned < 3) : (questioned += 1) {
-        const answer = try stdin.takeDelimiterExclusive('\n');
-        if (std.mem.eql(u8, answer, "N")) return;
-        if (std.mem.eql(u8, answer, "Y")) break;
-
+    if (approved) {
+        // review and approve package script
+        try stdout.print("The following script will be run:\n", .{});
+        try stdout.print("{s}", .{script});
         try stdout.print("Do you want to run it, Y/N?: ", .{});
         try stdout.flush();
-    } else {
-        return;
+
+        var questioned: usize = 0;
+        while (questioned < 3) : (questioned += 1) {
+            const answer = try stdin.takeDelimiterExclusive('\n');
+            if (std.mem.eql(u8, answer, "N")) return;
+            if (std.mem.eql(u8, answer, "Y")) break;
+
+            try stdout.print("Do you want to run it, Y/N?: ", .{});
+            try stdout.flush();
+        } else {
+            return;
+        }
     }
 
     const state = try lua.newStateAlloc(gpa);
