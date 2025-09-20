@@ -56,3 +56,15 @@ pub fn main() !void {
         },
     }
 }
+
+test "sha" {
+    const str = "hello";
+
+    const sha256 = std.crypto.hash.sha2.Sha256;
+    var hash_buf: [sha256.digest_length]u8 = undefined;
+
+    sha256.hash(str[0..], &hash_buf, .{});
+
+    // stdout.print(comptime fmt: []const u8, args: anytype)
+    std.debug.print("{x}\n", .{hash_buf[0..]});
+}
