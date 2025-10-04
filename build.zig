@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const strip = b.option(bool, "strip", "strip binary");
 
     const lua_dep = b.dependency("lua", .{});
     const lua_lib = b.addLibrary(.{
@@ -10,10 +11,10 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-
     lua_lib.root_module.addCSourceFiles(.{
         .root = lua_dep.path("src"),
         .files = lua_src_files,
@@ -33,6 +34,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .optimize = optimize,
             .target = target,
+            .strip = strip,
         }),
     });
 
