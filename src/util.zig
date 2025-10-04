@@ -63,3 +63,17 @@ pub const usage =
     \\Usage of packa
     \\
 ;
+
+pub fn makeOrOpenAbsoluteDir(path: []const u8) !std.fs.Dir {
+    if (std.fs.openDirAbsolute(path, .{})) |dir| {
+        return dir;
+    } else |err| {
+        switch (err) {
+            error.FileNotFound => {
+                try std.fs.makeDirAbsolute(path);
+                return try std.fs.openDirAbsolute(path, .{});
+            },
+            else => return err,
+        }
+    }
+}

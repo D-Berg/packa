@@ -44,7 +44,7 @@ pub fn main() !void {
             try stdout.flush();
         },
         .install => |install_args| {
-            try actions.install(gpa, install_args, env);
+            try actions.install(gpa, install_args, &env);
         },
         .err_msg => |err_msg| {
             try stderr.print("error: {s}\n", .{err_msg});
