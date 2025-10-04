@@ -74,8 +74,9 @@ fn installPackage(gpa: Allocator, packa_dir: std.fs.Dir, name: []const u8, appro
         var questioned: usize = 0;
         while (questioned < 3) : (questioned += 1) {
             const answer = try stdin.takeDelimiterExclusive('\n');
-            if (std.mem.eql(u8, answer, "N")) return;
-            if (std.mem.eql(u8, answer, "Y")) break;
+
+            if (std.mem.eql(u8, answer, "N") or std.mem.eql(u8, answer, "n")) return;
+            if (std.mem.eql(u8, answer, "Y") or std.mem.eql(u8, answer, "y")) break;
 
             try stdout.print("Do you want to run it, Y/N?: ", .{});
             try stdout.flush();
