@@ -77,3 +77,22 @@ pub fn makeOrOpenAbsoluteDir(path: []const u8) !std.fs.Dir {
         }
     }
 }
+
+/// Prompt user with a yes or no prompt, returning either true or false
+pub fn confirm(prompt: []const u8, retries: usize) !bool {
+    try stdout.print("{s} Y/N: ", .{prompt});
+    try stdout.flush();
+
+    var questioned: usize = 0;
+    while (questioned < retries) : (questioned += 1) {
+        const answer = try stdin.takeDelimiterExclusive('\n');
+
+        if (std.mem.eql(u8, answer, "N") or std.mem.eql(u8, answer, "n")) return false;
+        if (std.mem.eql(u8, answer, "Y") or std.mem.eql(u8, answer, "y")) return true;
+
+        try stdout.print("{s}", .{prompt});
+        try stdout.flush();
+    }
+
+    return false;
+}

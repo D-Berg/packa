@@ -65,21 +65,7 @@ fn installPackage(
         // review and approve package script
         try stdout.print("The following script will be run:\n", .{});
         try stdout.print("{s}", .{script});
-        try stdout.print("Do you want to run it, Y/N?: ", .{});
-        try stdout.flush();
-
-        var questioned: usize = 0;
-        while (questioned < 3) : (questioned += 1) {
-            const answer = try stdin.takeDelimiterExclusive('\n');
-
-            if (std.mem.eql(u8, answer, "N") or std.mem.eql(u8, answer, "n")) return;
-            if (std.mem.eql(u8, answer, "Y") or std.mem.eql(u8, answer, "y")) break;
-
-            try stdout.print("Do you want to run it, Y/N?: ", .{});
-            try stdout.flush();
-        } else {
-            return;
-        }
+        if (!try util.confirm("Do you want to run it?", 3)) return;
     }
 
     const state = try lua.newStateAlloc(gpa);
