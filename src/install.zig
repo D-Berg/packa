@@ -113,7 +113,7 @@ fn installPackage(
                     switch (lua.getField(state, -1, "url")) {
                         .string => {
                             const url = lua.toLString(state, -1);
-                            log.info("fetching {s}", .{url});
+                            log.info("fetching {s}...", .{url});
 
                             const correct_hash = switch (lua.getField(state, -2, "hash")) {
                                 .string => lua.toLString(state, -1),
@@ -161,7 +161,7 @@ fn installPackage(
                                 );
 
                                 var cache_path_buf: [256]u8 = undefined;
-                                const cache_path = try std.fmt.bufPrint(&cache_path_buf, "{s}/.cache/packa/fetch", .{
+                                const cache_path = try std.fmt.bufPrint(&cache_path_buf, "{s}/.local/share/packa/cache", .{
                                     home_dir_path,
                                 });
 
@@ -188,7 +188,7 @@ fn installPackage(
                         },
                     }
                 },
-                .none => {
+                .none, .nil => {
                     log.err("sorry no prebuilt binary exist for {s}", .{arch_os});
                     return;
                 },
@@ -200,30 +200,4 @@ fn installPackage(
         },
         else => return error.WrongLuaType,
     }
-    // _ = lua.getField(state, -1, "url");
-
-    // const url = lua.toLString(state, -1);
-    //
-    // var client = std.http.Client{ .allocator = arena };
-    // defer client.deinit();
-    //
-    // var alloc_writer = std.Io.Writer.Allocating.init(arena);
-    //
-    // const res = try client.fetch(.{
-    //     .response_writer = &alloc_writer.writer,
-    //     .location = .{ .url = url },
-    // });
-    //
-    // if (res.status == .ok) {
-    //     var save_file = try std.fs.cwd().createFile("zig.tar.xz", .{});
-    //     defer save_file.close();
-    //
-    //     var file_write_buf: [1024]u8 = undefined;
-    //     var file_writer = save_file.writer(&file_write_buf);
-    //
-    //     try file_writer.interface.writeAll(alloc_writer.writer.buffered());
-    //     try file_writer.interface.flush();
-    // }
-    //
-    // lua.pop(state, 2);
 }
