@@ -12,16 +12,19 @@ const stdout = util.stdout;
 const stdin = util.stdin;
 
 pub fn install(gpa: Allocator, args: InstallArgs, env: *std.process.EnvMap) !void {
-    var arena_impl: std.heap.ArenaAllocator = .init(gpa);
-    defer arena_impl.deinit();
-
-    const arena = arena_impl.allocator();
+    // var arena_impl: std.heap.ArenaAllocator = .init(gpa);
+    // defer arena_impl.deinit();
+    //
+    // const arena = arena_impl.allocator();
 
     const home_dir_path = env.get("HOME") orelse return;
 
-    const packa_path = try std.fmt.allocPrint(arena, "{s}/.local/share/packa", .{home_dir_path});
+    var home_dir = try std.fs.openDirAbsolute(home_dir_path, .{});
+    defer home_dir.close();
 
-    var dir = try util.makeOrOpenAbsoluteDir(packa_path);
+    try home_dir.makePath(".local/share/packa");
+
+    var dir = try home_dir.openDir(".local/share/packa", .{});
     defer dir.close();
 
     for (args.package_names) |name| {
