@@ -96,3 +96,52 @@ pub fn confirm(prompt: []const u8, retries: usize) !bool {
 
     return false;
 }
+
+pub fn fetch(gpa: Allocator, url: []const u8) ![]const u8 {
+    var client = std.http.Client{ .allocator = gpa };
+    defer client.deinit();
+
+    var alloc_writer = std.Io.Writer.Allocating.init(gpa);
+
+    const res = try client.fetch(.{
+        .response_writer = &alloc_writer.writer,
+        .location = .{ .url = url },
+    });
+
+    if (res.status == .ok) {
+        return try alloc_writer.toOwnedSlice();
+    }
+
+    return error.FailedFetch;
+}
+
+pub fn saveSliceToFile(dir: std.fs.Dir, file_name: []const u8, data: []const u8) !void {
+    var save_file = try dir.createFile(file_name, .{});
+    defer save_file.close();
+
+    var file_write_buf: [1024]u8 = undefined;
+    var file_writer = save_file.writer(&file_write_buf);
+
+    try file_writer.interface.writeAll(data);
+    try file_writer.interface.flush();
+}
+
+pub fn getLuaScript(gpa: Allocator, name: []const u8, dir: std.fs.Dir) ![:0]const u8 {
+    const script_path = try std.fmt.allocPrint(gpa, "formulas/{s}/{s}.lua", .{
+        name[0..1], name,
+    });
+    defer gpa.free(script_path);
+
+    const script_file = try dir.openFile(script_path, .{});
+    defer script_file.close();
+
+    var read_buffer: [1024]u8 = undefined;
+    var file_reader = script_file.reader(&read_buffer);
+
+    var alloc_writer = std.Io.Writer.Allocating.init(gpa);
+    errdefer alloc_writer.deinit();
+
+    _ = try file_reader.interface.streamRemaining(&alloc_writer.writer);
+
+    return try alloc_writer.toOwnedSliceSentinel(0);
+}

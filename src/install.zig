@@ -25,7 +25,7 @@ pub fn install(gpa: Allocator, args: InstallArgs, env: *std.process.EnvMap) !voi
     defer dir.close();
 
     for (args.package_names) |name| {
-        try installPackage(gpa, dir, name, args.approved, home_dir_path);
+        try installPackage(gpa, dir, name, args.approved);
     }
 }
 
@@ -34,7 +34,6 @@ fn installPackage(
     packa_dir: std.fs.Dir,
     name: []const u8,
     approved: bool,
-    home_dir_path: []const u8,
 ) !void {
     var arena_impl = std.heap.ArenaAllocator.init(gpa);
     defer arena_impl.deinit();
@@ -43,22 +42,15 @@ fn installPackage(
 
     log.debug("installing package: {s}", .{name});
 
-    const script = blk: {
-        const script_path = try std.fmt.allocPrint(gpa, "formulas/{s}/{s}.lua", .{
-            name[0..1], name,
-        });
-        defer gpa.free(script_path);
-        const script_file = try packa_dir.openFile(script_path, .{});
-        defer script_file.close();
-
-        var read_buffer: [1024]u8 = undefined;
-        var file_reader = script_file.reader(&read_buffer);
-
-        var alloc_writer = std.Io.Writer.Allocating.init(arena);
-
-        _ = try file_reader.interface.streamRemaining(&alloc_writer.writer);
-
-        break :blk try alloc_writer.toOwnedSliceSentinel(0);
+    const script = util.getLuaScript(arena, name, packa_dir) catch |err| switch (err) {
+        error.FileNotFound => {
+            log.info("package {s} is missing formula", .{name});
+            return;
+        },
+        else => {
+            log.err("Failed to get script: {t}", .{err});
+            return;
+        },
     };
 
     if (!approved) {
@@ -131,56 +123,33 @@ fn installPackage(
                                 return;
                             }
 
-                            var client = std.http.Client{ .allocator = arena };
-                            defer client.deinit();
+                            const fetched = try util.fetch(arena, url);
 
-                            var alloc_writer = std.Io.Writer.Allocating.init(arena);
+                            sha256.hash(fetched, &computed_hash, .{});
 
-                            const res = try client.fetch(.{
-                                .response_writer = &alloc_writer.writer,
-                                .location = .{ .url = url },
-                            });
+                            var buf: [sha256.digest_length * 2]u8 = undefined;
+                            const readable_hash = try std.fmt.bufPrint(&buf, "{x}", .{computed_hash[0..]});
 
-                            if (res.status == .ok) {
-                                sha256.hash(alloc_writer.written(), &computed_hash, .{});
-
-                                var buf: [sha256.digest_length * 2]u8 = undefined;
-                                const readable_hash = try std.fmt.bufPrint(&buf, "{x}", .{computed_hash[0..]});
-
-                                if (!std.mem.eql(u8, readable_hash, correct_hash)) {
-                                    log.err("wrong hash: expected {s}, got {s}", .{ correct_hash, readable_hash });
-                                    return;
-                                }
-
-                                // assume tar.xz
-                                var file_name_buffer: [256]u8 = undefined;
-                                const file_name = try std.fmt.bufPrint(
-                                    &file_name_buffer,
-                                    "{s}-{s}.tar.xz",
-                                    .{ full_name, version },
-                                );
-
-                                var cache_path_buf: [256]u8 = undefined;
-                                const cache_path = try std.fmt.bufPrint(&cache_path_buf, "{s}/.local/share/packa/cache", .{
-                                    home_dir_path,
-                                });
-
-                                var cache_dir = try util.makeOrOpenAbsoluteDir(cache_path);
-                                defer cache_dir.close();
-
-                                var save_file = try cache_dir.createFile(file_name, .{});
-                                defer save_file.close();
-
-                                var file_write_buf: [1024]u8 = undefined;
-                                var file_writer = save_file.writer(&file_write_buf);
-
-                                try file_writer.interface.writeAll(alloc_writer.writer.buffered());
-                                try file_writer.interface.flush();
-
-                                log.info("installed file", .{});
-                            } else {
-                                log.err("got status {t}", .{res.status});
+                            if (!std.mem.eql(u8, readable_hash, correct_hash)) {
+                                log.err("wrong hash: expected {s}, got {s}", .{ correct_hash, readable_hash });
+                                return;
                             }
+
+                            // assume tar.xz
+                            var file_name_buffer: [256]u8 = undefined;
+                            const file_name = try std.fmt.bufPrint(
+                                &file_name_buffer,
+                                "{s}-{s}.tar.xz",
+                                .{ full_name, version },
+                            );
+
+                            try packa_dir.makePath("cache"); // make sure cache dir exists
+                            var cache_dir = try packa_dir.openDir("cache", .{});
+                            defer cache_dir.close();
+
+                            try util.saveSliceToFile(cache_dir, file_name, fetched);
+
+                            log.info("installed file", .{});
                         },
                         else => {
                             log.err("url field needs to be either a string", .{});
