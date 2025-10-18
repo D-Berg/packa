@@ -47,12 +47,12 @@ fn installPackage(
 
     const script = util.getLuaScript(arena, name, packa_dir) catch |err| switch (err) {
         error.FileNotFound => {
-            log.info("package {s} is missing formula", .{name});
-            return;
+            log.err("package {s} is missing formula", .{name});
+            return err;
         },
         else => {
             log.err("Failed to get script: {t}", .{err});
-            return;
+            return err;
         },
     };
 
