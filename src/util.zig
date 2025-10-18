@@ -108,11 +108,18 @@ pub fn fetch(gpa: Allocator, url: []const u8) ![]const u8 {
         .location = .{ .url = url },
     });
 
-    if (res.status == .ok) {
-        return try alloc_writer.toOwnedSlice();
-    }
+    switch (res.status) {
+        .ok => return try alloc_writer.toOwnedSlice(),
+        else => |status| {
+            std.log.err("Failed to fetch from {s}, got status {t}({d})", .{
+                url,
+                status,
+                @intFromEnum(status),
+            });
 
-    return error.FailedFetch;
+            return error.FailedFetch;
+        },
+    }
 }
 
 pub fn saveSliceToFile(dir: std.fs.Dir, file_name: []const u8, data: []const u8) !void {
