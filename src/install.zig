@@ -91,8 +91,24 @@ fn installPackage(
     };
 
     // TODO: check cache
+    var cache_dir = try packa_dir.openDir("cache", .{});
+    defer cache_dir.close();
 
-    switch (lua.getField(state, -3, "fetch")) {
+    var file_name_buffer: [256]u8 = undefined;
+    const file_name = try std.fmt.bufPrint(
+        &file_name_buffer,
+        "{s}-{s}.tar.xz",
+        .{ full_name, version },
+    );
+
+    try packa_dir.makePath("cache"); // make sure cache dir exists
+    if (cache_dir.openFile(file_name, .{})) |cached_file| {
+        defer cached_file.close();
+        log.debug("found existing cached archive", .{});
+        var file_path_buf: [1024]u8 = undefined;
+        const file_path = try std.fmt.bufPrint(&file_path_buf, "packages/{s}/{s}", .{ name[0..1], name });
+        try packa_dir.makePath(file_path);
+    } else |_| switch (lua.getField(state, -3, "fetch")) {
         .function => {
             std.debug.print("fetch is a function\n", .{});
             try lua.pcallk(state);
@@ -137,18 +153,6 @@ fn installPackage(
                                 log.err("wrong hash: expected {s}, got {s}", .{ correct_hash, readable_hash });
                                 return;
                             }
-
-                            // assume tar.xz
-                            var file_name_buffer: [256]u8 = undefined;
-                            const file_name = try std.fmt.bufPrint(
-                                &file_name_buffer,
-                                "{s}-{s}.tar.xz",
-                                .{ full_name, version },
-                            );
-
-                            try packa_dir.makePath("cache"); // make sure cache dir exists
-                            var cache_dir = try packa_dir.openDir("cache", .{});
-                            defer cache_dir.close();
 
                             try util.saveSliceToFile(cache_dir, file_name, fetched);
 
