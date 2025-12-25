@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const c = @import("c");
-const lua = @import("lua.zig");
+const zlua = @import("zlua.zig");
 const util = @import("util.zig");
 const InstallArgs = util.InstallArgs;
 const log = std.log;
@@ -67,31 +67,31 @@ fn installPackage(
         if (!try util.confirm(io, "Do you want to run it?", 3)) return;
     }
 
-    var state: lua.State = .{ .gpa = gpa };
-    try state.new();
-    defer state.close();
+    var lua: zlua.State = .{ .gpa = gpa };
+    try lua.new();
+    defer lua.close();
 
-    state.openLibs();
+    lua.openLibs();
 
-    try state.loadString(script);
-    try state.pcallk(0, 1, 0, 0, null);
+    try lua.loadString(script);
+    try lua.pcallk(0, 1, 0, 0, null);
 
-    switch (state.getField(-1, "homepage")) {
+    switch (lua.getField(-1, "homepage")) {
         .string => {
-            std.debug.print("{s}\n", .{state.toLString(-1)});
+            std.debug.print("{s}\n", .{lua.toLString(-1)});
         },
         else => return error.UnexecpectedLuaType,
     }
 
-    state.pop(1);
+    lua.pop(1);
 
-    const full_name = switch (state.getField(-1, "name")) {
-        .string => state.toLString(-1),
+    const full_name = switch (lua.getField(-1, "name")) {
+        .string => lua.toLString(-1),
         else => return error.LuaError,
     };
 
-    const version = switch (state.getField(-2, "version")) {
-        .string => state.toLString(-1),
+    const version = switch (lua.getField(-2, "version")) {
+        .string => lua.toLString(-1),
         else => return error.LuaError,
     };
 
@@ -113,10 +113,10 @@ fn installPackage(
         var file_path_buf: [1024]u8 = undefined;
         const file_path = try std.fmt.bufPrint(&file_path_buf, "packages/{s}/{s}", .{ name[0..1], name });
         try packa_dir.makePath(file_path);
-    } else |_| switch (state.getField(-3, "fetch")) {
+    } else |_| switch (lua.getField(-3, "fetch")) {
         .function => {
             std.debug.print("fetch is a function\n", .{});
-            try state.pcallk(0, lua.MultiRet, 0, 0, null);
+            try lua.pcallk(0, zlua.MultiRet, 0, 0, null);
         },
         .table => {
             var arch_os_buf: [64]u8 = undefined;
@@ -124,15 +124,15 @@ fn installPackage(
 
             log.info("checking if prebuilt binary exists for {s}", .{arch_os});
 
-            switch (state.getField(-1, arch_os)) {
+            switch (lua.getField(-1, arch_os)) {
                 .table => {
-                    switch (state.getField(-1, "url")) {
+                    switch (lua.getField(-1, "url")) {
                         .string => {
-                            const url = state.toLString(-1);
+                            const url = lua.toLString(-1);
                             log.info("fetching {s}...", .{url});
 
-                            const correct_hash = switch (state.getField(-2, "hash")) {
-                                .string => state.toLString(-1),
+                            const correct_hash = switch (lua.getField(-2, "hash")) {
+                                .string => lua.toLString(-1),
                                 else => |kind| {
                                     log.err("expected lua string got {t}", .{kind});
                                     return error.LuaError;

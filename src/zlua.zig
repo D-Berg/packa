@@ -27,11 +27,23 @@ pub const Error = error{
 
 pub const State = struct {
     inner: *LuaState = undefined,
-    gpa: Allocator,
+    gpa: ?Allocator = null,
 
-    /// Requires a stable pointer for gpa
+    /// Initialize a Lua State.
+    /// This is an intrusive initiatialisation since it requires a stable pointer to the gpa.
+    /// Example:
+    /// ```
+    /// var lua: zlua.State = .{ .gpa = gpa };
+    /// try lua.new();
+    /// ```
     pub fn new(self: *State) !void {
-        if (c.lua_newstate(alloc, &self.gpa)) |state| {
+        var alloc_fn: ?AllocFn = null;
+        var gpa: ?*Allocator = null;
+        if (self.gpa != null) {
+            alloc_fn = alloc;
+            gpa = &self.gpa.?;
+        }
+        if (c.lua_newstate(alloc_fn, gpa)) |state| {
             self.inner = state;
             return;
         }
@@ -143,6 +155,13 @@ pub const State = struct {
         c.lua_remove(self.inner, index);
     }
 };
+
+const AllocFn = *const fn (
+    maybe_ud: ?*anyopaque,
+    maybe_ptr: ?*anyopaque,
+    osize: usize,
+    nsize: usize,
+) callconv(.c) ?*anyopaque;
 
 fn alloc(
     maybe_ud: ?*anyopaque,
