@@ -141,13 +141,26 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     var print_buf: [128]u8 = undefined;
 
-    const n_args = lua.getTop();
+    const n_args: usize = @intCast(lua.getTop());
     std.debug.print("run got called with {d} args\n", .{n_args});
 
-    assert(lua.getField(1, "io") == .light_userdata);
+    if (n_args < 2) {
+        lua.pushNil();
+        _ = lua.pushlString("Too few arguments");
+        return 2;
+    }
+
+    if (lua.typeOf(1) != .table) {
+        lua.pushNil();
+        _ = lua.pushlString("First argument neeed to be a table, try ctx:run instead");
+        return 2;
+    }
+
+    const ctx = 1;
+    assert(lua.getField(ctx, "io") == .light_userdata);
     const io_ud = lua.toUserdata(-1) orelse {
         lua.pop(1);
-        lua.pushBoolean(false);
+        lua.pushNil();
         _ = lua.pushlString("io userdata was null");
         return 2;
     };
@@ -155,25 +168,27 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const io_ptr: *const Io = @ptrCast(@alignCast(io_ud));
     const io = io_ptr.*;
 
-    assert(lua.getField(1, "gpa") == .light_userdata);
+    assert(lua.getField(ctx, "gpa") == .light_userdata);
     const gpa_ud = lua.toUserdata(-1) orelse {
         lua.pop(1);
-        lua.pushBoolean(false);
+        lua.pushNil();
         _ = lua.pushlString("gpa userdata was null");
         return 2;
     };
     lua.pop(1); // restore stack
+
     const gpa_ptr: *const Allocator = @ptrCast(@alignCast(gpa_ud));
     const gpa = gpa_ptr.*;
 
-    const argv = gpa.alloc([]const u8, lua.rawLen(2)) catch |err| {
+    const argv = gpa.alloc([]const u8, n_args - 1) catch |err| {
         std.debug.panic("{t}", .{err});
     };
     defer gpa.free(argv);
 
     for (0..argv.len) |i| {
-        switch (lua.rawGeti(2, i + 1)) { // pushes
-            .string => argv[i] = lua.toLString(-1),
+        const lua_idx: isize = @intCast(i + 2);
+        switch (lua.typeOf(lua_idx)) { // pushes
+            .string => argv[i] = lua.toLString(lua_idx),
             inline else => |t| {
                 lua.pop(1); // rawGeti
                 const err_msg = std.fmt.bufPrint(
@@ -181,25 +196,24 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
                     "Expected arg[{d}] be of type string, got {t}",
                     .{ i + 1, t },
                 ) catch "Unexpected type";
-                lua.pushBoolean(false);
+
+                lua.pushNil();
                 _ = lua.pushlString(err_msg);
 
                 return 2;
             },
         }
-        // safe since table hold reference to the strings
-        lua.pop(1); // rawGetI;
     }
 
     var child = std.process.Child.init(argv, gpa);
     child.spawn(io) catch {
-        lua.pushBoolean(false);
+        lua.pushNil();
         _ = lua.pushlString("SpawnError");
         return 2;
     };
 
     const term = child.wait(io) catch {
-        lua.pushBoolean(false);
+        lua.pushNil();
         _ = lua.pushlString("WaitError");
         return 2;
     };

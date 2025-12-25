@@ -42,7 +42,6 @@ pub fn install(
             .lua = .{ .gpa = gpa },
             .progress = progress,
         };
-        try packages[i].lua.new();
         try packages[i].lua.new(0);
         initialized_packages += 1;
 
