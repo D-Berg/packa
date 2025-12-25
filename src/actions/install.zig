@@ -43,6 +43,7 @@ pub fn install(
             .progress = progress,
         };
         try packages[i].lua.new();
+        try packages[i].lua.new(0);
         initialized_packages += 1;
 
         try packages[i].tryFetch(io, gpa, home_dir);
