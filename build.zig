@@ -11,6 +11,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const minizign_dep = b.dependency("minizign", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe = b.addExecutable(.{
         .name = @tagName(manifest.name),
         .root_module = b.createModule(.{
@@ -21,6 +26,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     exe.root_module.addImport("zlua", zlua_dep.module("zlua"));
+    exe.root_module.addImport("minizign", minizign_dep.module("minizign"));
     b.installArtifact(exe);
 
     const run_exe = b.addRunArtifact(exe);

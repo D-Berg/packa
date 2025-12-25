@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const actions = @import("actions.zig");
 const util = @import("util.zig");
 const cli = @import("cli.zig");
+const minizign = @import("minizign");
 
 const Io = std.Io;
 
@@ -25,6 +26,9 @@ pub fn main() !void {
 
     const io = threaded_io.io();
 
+    const progress = std.Progress.start(io, .{});
+    defer progress.end();
+
     var arena_impl: std.heap.ArenaAllocator = .init(gpa);
     defer arena_impl.deinit();
 
@@ -46,7 +50,7 @@ pub fn main() !void {
     const command = try cli.parse(arena, args, null);
     switch (command) {
         .install => |install_args| {
-            try actions.install(io, gpa, &env, install_args);
+            try actions.install(io, gpa, progress, &env, install_args);
         },
         .help => |help| {
             var stdout_buf: [64]u8 = undefined;

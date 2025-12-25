@@ -36,6 +36,11 @@ const ArgIterator = struct {
         self.idx += 1;
         return true;
     }
+
+    fn remaining(self: *ArgIterator) ?[]const u8 {
+        if (self.idx >= self.args.len) return null;
+        return self.args[self.idx..];
+    }
 };
 
 // TODO: add Diagnostic to cli parsing
@@ -57,9 +62,12 @@ pub fn parse(gpa: Allocator, args: []const []const u8, diag: ?*Diagnostic) !Comm
 pub const InstallArgs = struct {
     package_names: []const []const u8,
     approved: bool,
+    build_from_source: bool,
 };
 fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
-    var approved = false;
+    var approved: bool = false;
+    var build_from_source: bool = false;
+
     var package_names: std.ArrayList([]const u8) = .empty;
     errdefer package_names.deinit(gpa);
 
@@ -68,6 +76,8 @@ fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
             return .{ .help = "packa install <formula1> <formula2> ..." };
         } else if (std.mem.eql(u8, arg, "-y") or std.mem.eql(u8, arg, "--yes")) {
             approved = true;
+        } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--source")) {
+            build_from_source = true;
         } else {
             try package_names.append(gpa, arg);
         }
@@ -75,6 +85,7 @@ fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
 
     return .{ .install = .{
         .package_names = try package_names.toOwnedSlice(gpa),
+        .build_from_source = true,
         .approved = approved,
     } };
 }

@@ -2,6 +2,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+const minizign = @import("minizign");
+const pub_key = @embedFile("minisign.pub");
+
 pub fn makeOrOpenAbsoluteDir(path: []const u8) !std.fs.Dir {
     if (std.fs.openDirAbsolute(path, .{})) |dir| {
         return dir;
@@ -47,6 +50,7 @@ pub fn fetch(io: Io, gpa: Allocator, url: []const u8) ![]const u8 {
     defer client.deinit();
 
     var alloc_writer = std.Io.Writer.Allocating.init(gpa);
+    errdefer alloc_writer.deinit();
 
     const res = try client.fetch(.{
         .response_writer = &alloc_writer.writer,
@@ -78,7 +82,7 @@ pub fn saveSliceToFile(io: Io, dir: Io.Dir, file_name: []const u8, data: []const
     try file_writer.interface.flush();
 }
 
-pub fn getLuaScript(io: Io, gpa: Allocator, name: []const u8, dir: Io.Dir) ![:0]const u8 {
+pub fn getLuaScript(io: Io, gpa: Allocator, dir: Io.Dir, name: []const u8) ![:0]const u8 {
     const script_path = try std.fmt.allocPrint(gpa, "formulas/{s}/{s}.lua", .{
         name[0..1], name,
     });
@@ -96,4 +100,19 @@ pub fn getLuaScript(io: Io, gpa: Allocator, name: []const u8, dir: Io.Dir) ![:0]
     _ = try file_reader.interface.streamRemaining(&alloc_writer.writer);
 
     return try alloc_writer.toOwnedSliceSentinel(0);
+}
+
+/// Verify minisign Signature
+pub fn checkSignature(gpa: Allocator, bytes: []const u8, minisig: []const u8) !bool {
+    var pks_buf: [64]minizign.PublicKey = undefined;
+    const pks = try minizign.PublicKey.decode(&pks_buf, pub_key);
+
+    var sig = try minizign.Signature.decode(gpa, minisig);
+    defer sig.deinit();
+
+    var verifier = try pks[0].verifier(&sig);
+    verifier.update(bytes);
+    verifier.verify(gpa) catch return false;
+
+    return true;
 }
