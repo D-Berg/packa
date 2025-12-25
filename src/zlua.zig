@@ -27,29 +27,42 @@ pub const Error = error{
 
 pub const State = struct {
     inner: *LuaState = undefined,
+    /// The allocator for which lua will use for all allocations.
+    /// Set to null to use malloc.
     gpa: ?Allocator = null,
 
     /// Initialize a Lua State.
-    /// This is an intrusive initiatialisation since it requires a stable pointer to the gpa.
-    /// Example:
-    /// ```
+    /// This is an intrusive initiatialisation since it
+    /// requires a stable pointer to the gpa if one is set.
+    ///
+    /// # Example:
+    ///
+    /// ```zig
     /// var lua: zlua.State = .{ .gpa = gpa };
     /// try lua.new();
     /// ```
-    pub fn new(self: *State) !void {
-        var alloc_fn: ?AllocFn = null;
-        var gpa: ?*Allocator = null;
-        if (self.gpa != null) {
-            alloc_fn = alloc;
-            gpa = &self.gpa.?;
-        }
-        if (c.lua_newstate(alloc_fn, gpa)) |state| {
+    pub fn new(self: *State) Error!void {
+        if (self.gpa) |*gpa| {
+            if (c.lua_newstate(alloc, gpa)) |state| {
+                self.inner = state;
+                return;
+            }
+            return Error.NewStateError;
+        } else if (c.luaL_newstate()) |state| {
             self.inner = state;
             return;
-        }
-        return error.LuaError;
+        } else return Error.NewStateError;
     }
 
+    /// Close all active to-be-closed variables in the main thread,
+    /// release all objects in the given Lua state
+    /// (calling the corresponding garbage-collection metamethods, if any),
+    /// and frees all dynamic memory used by this state.
+    ///
+    /// On several platforms, you may not need to call this function,
+    /// because all resources are naturally released when the host program ends.
+    /// On the other hand, long-running programs that create multiple states,
+    /// such as daemons or web servers, will probably need to close states as soon as they are not needed.
     pub fn close(self: *const State) void {
         c.lua_close(self.inner);
     }
@@ -130,8 +143,18 @@ pub const State = struct {
     ///Pushes onto the stack the value `t[k]`, where t is the value at the given index.
     ///As in Lua, this function may trigger a metamethod for the "index" event (see §2.4).
     //Returns the type of the pushed value.
-    pub fn getField(state: *State, idx: isize, field: [:0]const u8) Type {
+    pub fn getField(state: *const State, idx: isize, field: [:0]const u8) Type {
         return @enumFromInt(c.lua_getfield(state.inner, @intCast(idx), field));
+    }
+
+    pub fn isBoolean(state: *const State, idx: isize) bool {
+        if (c.lua_isboolean(state.inner, idx) == 1) return true;
+        return false;
+    }
+
+    /// Returns the type of the value in the given valid index
+    pub fn typeOf(state: *const State, idx: isize) Type {
+        return @enumFromInt(c.lua_type(state.inner, idx));
     }
 
     pub fn toLString(state: *State, idx: isize) []const u8 {
@@ -155,13 +178,6 @@ pub const State = struct {
         c.lua_remove(self.inner, index);
     }
 };
-
-const AllocFn = *const fn (
-    maybe_ud: ?*anyopaque,
-    maybe_ptr: ?*anyopaque,
-    osize: usize,
-    nsize: usize,
-) callconv(.c) ?*anyopaque;
 
 fn alloc(
     maybe_ud: ?*anyopaque,
