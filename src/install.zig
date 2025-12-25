@@ -4,8 +4,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const c = @import("c");
-const zlua = @import("zlua.zig");
+const zlua = @import("zlua");
 const util = @import("util.zig");
 const InstallArgs = util.InstallArgs;
 const log = std.log;
