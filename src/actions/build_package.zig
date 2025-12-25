@@ -5,6 +5,8 @@ const util = @import("../util.zig");
 const zlua = @import("zlua");
 const assert = std.debug.assert;
 
+const bufPrint = std.fmt.bufPrint;
+
 const BuildArgs = cli.BuildArgs;
 
 const Allocator = std.mem.Allocator;
@@ -21,13 +23,19 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     const packa_dir = try home_dir.openDir(io, ".local/share/packa", .{});
     defer packa_dir.close(io);
 
+    const cache_dir = home_dir.openDir(io, ".cache/packa", .{}) catch blk: {
+        try home_dir.createDirPath(io, ".cache/packa");
+        break :blk try home_dir.openDir(io, ".cache/packa", .{});
+    };
+    defer cache_dir.close(io);
+
     const manifest = try util.getLuaScript(io, gpa, packa_dir, args.package_name);
     defer gpa.free(manifest);
 
     std.debug.print("manifest: \n\n{s}\n\n", .{manifest});
 
     var lua: zlua.State = .{ .gpa = gpa };
-    try lua.new();
+    try lua.new(0);
     defer lua.close();
 
     lua.requiref("_G", zlua.Lib.base, true);
@@ -59,6 +67,36 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
         else => return error.WrongLuaType,
     };
     std.debug.print("src_url: {s}\n", .{src_url});
+
+    const pkg_hash = switch (lua.getField(manifest_idx, "hash")) {
+        .string => lua.toLString(-1),
+        else => return error.WrongLuaType,
+    };
+    std.debug.print("pkg_hash: {s}\n", .{pkg_hash});
+
+    // use for temporary strings
+    var print_buf: [4096]u8 = undefined;
+
+    const tar_file_name = src_url[1 + std.mem.findScalarLast(u8, src_url, '/').? ..];
+    const is_cached = if (cache_dir.access(io, tar_file_name, .{})) true else |_| false;
+    if (!is_cached) {
+        const file = try cache_dir.createFile(io, tar_file_name, .{});
+        defer file.close(io);
+
+        var file_writer_buf: [4096]u8 = undefined;
+        var file_writer = file.writer(io, &file_writer_buf);
+
+        const bytes = try util.fetch(io, gpa, src_url);
+        defer gpa.free(bytes);
+
+        // TODO: verify hash
+
+        var reader: Io.Reader = .fixed(bytes);
+
+        assert(try reader.streamRemaining(&file_writer.interface) == bytes.len);
+    }
+
+    std.debug.print("cache contains {s}: {}\n", .{ tar_file_name, is_cached });
 
     if (lua.getField(manifest_idx, "build") != .function) {
         std.debug.print("lua: build is not a function\n", .{});
