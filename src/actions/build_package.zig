@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const cli = @import("../cli.zig");
 const util = @import("../util.zig");
 const zlua = @import("zlua");
+const assert = std.debug.assert;
 
 const BuildArgs = cli.BuildArgs;
 
@@ -78,6 +79,20 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
     lua.setField(ctx, "arch");
 
+    // TODO: actually provide a prefix;
+    _ = lua.pushlString("prefix_tmp");
+    lua.setField(ctx, "prefix");
+
+    // ctx.run = luaRun
+    lua.pushCFunction(luaRun);
+    lua.setField(ctx, "run");
+
+    lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&io))));
+    lua.setField(ctx, "io");
+
+    lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&gpa))));
+    lua.setField(ctx, "gpa");
+
     lua.newTable();
     const env_table = lua.getTop();
     lua.pushCFunction(luaEnvSet);
@@ -89,18 +104,20 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     lua.setField(ctx, "env");
 
     // build(ctx)
-    try lua.pcall(1, 0, 0);
+    lua.pcall(1, 0, 0) catch |err| {
+        // TODO: run cleanup
+        return err;
+    };
 }
 
+// TODO: type check args and check number of args supplied by lua
 fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
     std.debug.print("lua called: lua_env_set\n", .{});
     const lua: zlua.State = .{ .inner = state.? };
 
-    var print_buf: [128]u8 = undefined;
-
-    _ = lua.getField(1, "ud");
-
+    assert(lua.getField(1, "ud") == .light_userdata);
     const ud = lua.toUserdata(-1) orelse {
+        lua.pop(1);
         lua.pushBoolean(false);
         _ = lua.pushlString("null userdata");
         return 2;
@@ -112,12 +129,82 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
     const value = lua.toLString(3);
 
     env_map.put(key, value) catch |err| {
-        const err_str = std.fmt.bufPrint(&print_buf, "{t}", .{err}) catch &.{};
+        std.debug.panic("{t}", .{err});
+    };
 
+    lua.pushBoolean(true);
+    return 1;
+}
+
+fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
+    const lua: zlua.State = .{ .inner = state.? };
+
+    var print_buf: [128]u8 = undefined;
+
+    const n_args = lua.getTop();
+    std.debug.print("run got called with {d} args\n", .{n_args});
+
+    assert(lua.getField(1, "io") == .light_userdata);
+    const io_ud = lua.toUserdata(-1) orelse {
+        lua.pop(1);
         lua.pushBoolean(false);
-        _ = lua.pushlString(err_str);
+        _ = lua.pushlString("io userdata was null");
         return 2;
     };
+    lua.pop(1); // restore stack
+    const io_ptr: *const Io = @ptrCast(@alignCast(io_ud));
+    const io = io_ptr.*;
+
+    assert(lua.getField(1, "gpa") == .light_userdata);
+    const gpa_ud = lua.toUserdata(-1) orelse {
+        lua.pop(1);
+        lua.pushBoolean(false);
+        _ = lua.pushlString("gpa userdata was null");
+        return 2;
+    };
+    lua.pop(1); // restore stack
+    const gpa_ptr: *const Allocator = @ptrCast(@alignCast(gpa_ud));
+    const gpa = gpa_ptr.*;
+
+    const argv = gpa.alloc([]const u8, lua.rawLen(2)) catch |err| {
+        std.debug.panic("{t}", .{err});
+    };
+    defer gpa.free(argv);
+
+    for (0..argv.len) |i| {
+        switch (lua.rawGeti(2, i + 1)) { // pushes
+            .string => argv[i] = lua.toLString(-1),
+            inline else => |t| {
+                lua.pop(1); // rawGeti
+                const err_msg = std.fmt.bufPrint(
+                    &print_buf,
+                    "Expected arg[{d}] be of type string, got {t}",
+                    .{ i + 1, t },
+                ) catch "Unexpected type";
+                lua.pushBoolean(false);
+                _ = lua.pushlString(err_msg);
+
+                return 2;
+            },
+        }
+        // safe since table hold reference to the strings
+        lua.pop(1); // rawGetI;
+    }
+
+    var child = std.process.Child.init(argv, gpa);
+    child.spawn(io) catch {
+        lua.pushBoolean(false);
+        _ = lua.pushlString("SpawnError");
+        return 2;
+    };
+
+    const term = child.wait(io) catch {
+        lua.pushBoolean(false);
+        _ = lua.pushlString("WaitError");
+        return 2;
+    };
+
+    std.debug.print("child exited with term: {t}({d})\n", .{ term, term.Exited });
 
     lua.pushBoolean(true);
     return 1;
