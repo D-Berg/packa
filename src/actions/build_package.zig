@@ -41,7 +41,7 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     const lua_script_name = try std.fmt.bufPrintZ(&lua_script_name_buf, "@{s}.lua", .{args.package_name});
 
     try lua.loadBuffer(manifest, lua_script_name);
-    try lua.pcallk(0, 1, 0, 0, null);
+    try lua.pcall(0, 1, 0);
 
     const manifest_idx = lua.getTop();
     std.debug.print("manifest_idx = {d}\n", .{manifest_idx});
@@ -89,7 +89,7 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     lua.setField(ctx, "env");
 
     // build(ctx)
-    try lua.pcallk(1, 0, 0, 0, null);
+    try lua.pcall(1, 0, 0);
 }
 
 fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
