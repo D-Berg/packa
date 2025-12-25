@@ -70,8 +70,8 @@ pub fn makeOrOpenAbsoluteDir(path: []const u8) !std.fs.Dir {
 /// Prompt user with a yes or no prompt, returning either true or false
 pub fn confirm(io: Io, prompt: []const u8, retries: usize) !bool {
     var stdout_buf: [64]u8 = undefined;
-    var stdout_w = std.fs.File.stdout().writer(&stdout_buf);
-    const stdout: *std.Io.Writer = &stdout_w.interface;
+    var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
+    const stdout: *Io.Writer = &stdout_w.interface;
 
     var stdin_buf: [64]u8 = undefined;
     var stdin_r = Io.File.stdin().reader(io, &stdin_buf);
@@ -118,25 +118,25 @@ pub fn fetch(io: Io, gpa: Allocator, url: []const u8) ![]const u8 {
     }
 }
 
-pub fn saveSliceToFile(dir: std.fs.Dir, file_name: []const u8, data: []const u8) !void {
-    var save_file = try dir.createFile(file_name, .{});
-    defer save_file.close();
+pub fn saveSliceToFile(io: Io, dir: Io.Dir, file_name: []const u8, data: []const u8) !void {
+    var save_file = try dir.createFile(io, file_name, .{});
+    defer save_file.close(io);
 
     var file_write_buf: [1024]u8 = undefined;
-    var file_writer = save_file.writer(&file_write_buf);
+    var file_writer = save_file.writer(io, &file_write_buf);
 
     try file_writer.interface.writeAll(data);
     try file_writer.interface.flush();
 }
 
-pub fn getLuaScript(io: Io, gpa: Allocator, name: []const u8, dir: std.fs.Dir) ![:0]const u8 {
+pub fn getLuaScript(io: Io, gpa: Allocator, name: []const u8, dir: Io.Dir) ![:0]const u8 {
     const script_path = try std.fmt.allocPrint(gpa, "formulas/{s}/{s}.lua", .{
         name[0..1], name,
     });
     defer gpa.free(script_path);
 
-    const script_file = try dir.openFile(script_path, .{});
-    defer script_file.close();
+    const script_file = try dir.openFile(io, script_path, .{});
+    defer script_file.close(io);
 
     var read_buffer: [1024]u8 = undefined;
     var file_reader = script_file.reader(io, &read_buffer);

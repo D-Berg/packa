@@ -17,13 +17,13 @@ pub fn install(io: Io, gpa: Allocator, args: InstallArgs, env: *std.process.EnvM
 
     const home_dir_path = env.get("HOME") orelse return;
 
-    var home_dir = try std.fs.openDirAbsolute(home_dir_path, .{});
-    defer home_dir.close();
+    var home_dir = try Io.Dir.cwd().openDir(io, home_dir_path, .{});
+    defer home_dir.close(io);
 
-    try home_dir.makePath(".local/share/packa");
+    try home_dir.createDirPath(io, ".local/share/packa");
 
-    var dir = try home_dir.openDir(".local/share/packa", .{});
-    defer dir.close();
+    var dir = try home_dir.openDir(io, ".local/share/packa", .{});
+    defer dir.close(io);
 
     for (args.package_names) |name| {
         try installPackage(io, gpa, dir, name, args.approved);
@@ -33,7 +33,7 @@ pub fn install(io: Io, gpa: Allocator, args: InstallArgs, env: *std.process.EnvM
 fn installPackage(
     io: Io,
     gpa: Allocator,
-    packa_dir: std.fs.Dir,
+    packa_dir: Io.Dir,
     name: []const u8,
     approved: bool,
 ) !void {
@@ -45,8 +45,8 @@ fn installPackage(
     log.debug("installing package: {s}", .{name});
 
     var stdout_buf: [64]u8 = undefined;
-    var stdout_w = std.fs.File.stdout().writer(&stdout_buf);
-    const stdout: *std.Io.Writer = &stdout_w.interface;
+    var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
+    const stdout: *Io.Writer = &stdout_w.interface;
 
     const script = util.getLuaScript(io, arena, name, packa_dir) catch |err| switch (err) {
         error.FileNotFound => {
@@ -95,8 +95,8 @@ fn installPackage(
     };
 
     // TODO: check cache
-    var cache_dir = try packa_dir.openDir("cache", .{});
-    defer cache_dir.close();
+    var cache_dir = try packa_dir.openDir(io, "cache", .{});
+    defer cache_dir.close(io);
 
     var file_name_buffer: [256]u8 = undefined;
     const file_name = try std.fmt.bufPrint(
@@ -105,13 +105,13 @@ fn installPackage(
         .{ full_name, version },
     );
 
-    try packa_dir.makePath("cache"); // make sure cache dir exists
-    if (cache_dir.openFile(file_name, .{})) |cached_file| {
-        defer cached_file.close();
+    try packa_dir.createDirPath(io, "cache"); // make sure cache dir exists
+    if (cache_dir.openFile(io, file_name, .{})) |cached_file| {
+        defer cached_file.close(io);
         log.debug("found existing cached archive", .{});
         var file_path_buf: [1024]u8 = undefined;
         const file_path = try std.fmt.bufPrint(&file_path_buf, "packages/{s}/{s}", .{ name[0..1], name });
-        try packa_dir.makePath(file_path);
+        try packa_dir.createDirPath(io, file_path);
     } else |_| switch (lua.getField(-3, "fetch")) {
         .function => {
             std.debug.print("fetch is a function\n", .{});
@@ -158,7 +158,7 @@ fn installPackage(
                                 return;
                             }
 
-                            try util.saveSliceToFile(cache_dir, file_name, fetched);
+                            try util.saveSliceToFile(io, cache_dir, file_name, fetched);
 
                             log.info("installed file", .{});
                         },

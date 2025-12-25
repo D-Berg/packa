@@ -19,7 +19,7 @@ pub fn main() !void {
         _ = debug_allocator.deinit();
     };
 
-    var threaded_io: Io.Threaded = .init(gpa);
+    var threaded_io: Io.Threaded = .init(gpa, .{});
     defer threaded_io.deinit();
 
     const io = threaded_io.io();
@@ -43,11 +43,11 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(arena);
 
     var stdout_buf: [64]u8 = undefined;
-    var stdout_w = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
     const stdout: *std.Io.Writer = &stdout_w.interface;
 
     var stderr_buf: [64]u8 = undefined;
-    var stderr_w = std.fs.File.stderr().writer(&stderr_buf);
+    var stderr_w = Io.File.stderr().writer(io, &stderr_buf);
     const stderr: *Io.Writer = &stderr_w.interface;
 
     const parsed_args = try util.parseArgs(arena, args[1..]);
