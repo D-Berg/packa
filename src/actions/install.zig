@@ -6,10 +6,15 @@ const Io = std.Io;
 
 const zlua = @import("zlua");
 const util = @import("../util.zig");
-const InstallArgs = util.InstallArgs;
+const cli = @import("../cli.zig");
 const log = std.log;
 
-pub fn install(io: Io, gpa: Allocator, args: InstallArgs, env: *std.process.EnvMap) !void {
+pub fn install(
+    io: Io,
+    gpa: Allocator,
+    env: *std.process.EnvMap,
+    args: cli.InstallArgs,
+) !void {
     // var arena_impl: std.heap.ArenaAllocator = .init(gpa);
     // defer arena_impl.deinit();
     //

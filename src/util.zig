@@ -2,56 +2,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-pub const Argument = union(enum) {
-    install: InstallArgs,
-    usage: []const u8,
-    err_msg: []const u8,
-    help: []const u8,
-};
-
-pub fn parseArgs(arena: Allocator, args: []const []const u8) !Argument {
-    if (args.len == 0) return .{ .usage = usage };
-    const first_arg = args[0];
-
-    if (std.mem.eql(u8, first_arg, "install")) {
-        return try parseInstallArgs(arena, args[1..]);
-    }
-
-    return .{ .err_msg = "Failed to parse arguments" };
-}
-
-fn parseInstallArgs(arena: Allocator, args: []const []const u8) !Argument {
-    _ = arena;
-
-    var approved = false;
-    if (args.len == 0) {
-        return .{ .err_msg = "no arguments passed to install cmd" };
-    }
-
-    // FIX: arg parsing flags
-    for (args) |arg| {
-        if (std.mem.eql(u8, arg, "-h")) {
-            return .{ .help = "packa install <formula1> <formula2> ..." };
-        }
-
-        if (std.mem.eql(u8, arg, "-y") or std.mem.eql(u8, arg, "--yes")) {
-            approved = true;
-        }
-    }
-
-    return .{ .install = .{ .package_names = args, .approved = approved } };
-}
-
-pub const InstallArgs = struct {
-    package_names: []const []const u8,
-    approved: bool = false,
-};
-
-pub const usage =
-    \\Usage of packa
-    \\
-;
-
 pub fn makeOrOpenAbsoluteDir(path: []const u8) !std.fs.Dir {
     if (std.fs.openDirAbsolute(path, .{})) |dir| {
         return dir;

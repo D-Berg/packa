@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const actions = @import("actions.zig");
 const util = @import("util.zig");
+const cli = @import("cli.zig");
 
 const Io = std.Io;
 
@@ -42,28 +43,16 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(arena);
 
-    var stdout_buf: [64]u8 = undefined;
-    var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
-    const stdout: *std.Io.Writer = &stdout_w.interface;
-
-    var stderr_buf: [64]u8 = undefined;
-    var stderr_w = Io.File.stderr().writer(io, &stderr_buf);
-    const stderr: *Io.Writer = &stderr_w.interface;
-
-    const parsed_args = try util.parseArgs(arena, args[1..]);
-    switch (parsed_args) {
-        .usage => |usage| {
-            try stdout.print("{s}", .{usage});
-            try stdout.flush();
-        },
+    const command = try cli.parse(arena, args, null);
+    switch (command) {
         .install => |install_args| {
-            try actions.install(io, gpa, install_args, &env);
-        },
-        .err_msg => |err_msg| {
-            try stderr.print("error: {s}\n", .{err_msg});
-            try stderr.flush();
+            try actions.install(io, gpa, &env, install_args);
         },
         .help => |help| {
+            var stdout_buf: [64]u8 = undefined;
+            var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
+            const stdout: *std.Io.Writer = &stdout_w.interface;
+
             try stdout.print("{s}\n", .{help});
             try stdout.flush();
         },
