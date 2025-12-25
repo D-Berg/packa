@@ -1,18 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const Install = @import("Install.zig");
-
-var stdout_buf: [1024]u8 = undefined;
-var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-pub const stdout = &stdout_writer.interface;
-
-var stderr_buf: [1024]u8 = undefined;
-var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
-pub const stderr = &stderr_writer.interface;
-
-var stdin_buf: [64]u8 = undefined;
-var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
-pub const stdin = &stdin_reader.interface;
 
 pub const Argument = union(enum) {
     install: InstallArgs,
@@ -79,10 +68,17 @@ pub fn makeOrOpenAbsoluteDir(path: []const u8) !std.fs.Dir {
 }
 
 /// Prompt user with a yes or no prompt, returning either true or false
-pub fn confirm(prompt: []const u8, retries: usize) !bool {
+pub fn confirm(io: Io, prompt: []const u8, retries: usize) !bool {
+    var stdout_buf: [64]u8 = undefined;
+    var stdout_w = std.fs.File.stdout().writer(&stdout_buf);
+    const stdout: *std.Io.Writer = &stdout_w.interface;
+
+    var stdin_buf: [64]u8 = undefined;
+    var stdin_r = Io.File.stdin().reader(io, &stdin_buf);
+    const stdin: *Io.Reader = &stdin_r.interface;
+
     try stdout.print("{s} Y/N: ", .{prompt});
     try stdout.flush();
-
     var questioned: usize = 0;
     while (questioned < retries) : (questioned += 1) {
         const answer = try stdin.takeDelimiterExclusive('\n');
@@ -97,8 +93,8 @@ pub fn confirm(prompt: []const u8, retries: usize) !bool {
     return false;
 }
 
-pub fn fetch(gpa: Allocator, url: []const u8) ![]const u8 {
-    var client = std.http.Client{ .allocator = gpa };
+pub fn fetch(io: Io, gpa: Allocator, url: []const u8) ![]const u8 {
+    var client: std.http.Client = .{ .io = io, .allocator = gpa };
     defer client.deinit();
 
     var alloc_writer = std.Io.Writer.Allocating.init(gpa);
@@ -133,7 +129,7 @@ pub fn saveSliceToFile(dir: std.fs.Dir, file_name: []const u8, data: []const u8)
     try file_writer.interface.flush();
 }
 
-pub fn getLuaScript(gpa: Allocator, name: []const u8, dir: std.fs.Dir) ![:0]const u8 {
+pub fn getLuaScript(io: Io, gpa: Allocator, name: []const u8, dir: std.fs.Dir) ![:0]const u8 {
     const script_path = try std.fmt.allocPrint(gpa, "formulas/{s}/{s}.lua", .{
         name[0..1], name,
     });
@@ -143,7 +139,7 @@ pub fn getLuaScript(gpa: Allocator, name: []const u8, dir: std.fs.Dir) ![:0]cons
     defer script_file.close();
 
     var read_buffer: [1024]u8 = undefined;
-    var file_reader = script_file.reader(&read_buffer);
+    var file_reader = script_file.reader(io, &read_buffer);
 
     var alloc_writer = std.Io.Writer.Allocating.init(gpa);
     errdefer alloc_writer.deinit();

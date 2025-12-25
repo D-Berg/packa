@@ -1,12 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const actions = @import("actions.zig");
-
 const util = @import("util.zig");
+
+const Io = std.Io;
+
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 const log = std.log;
-const stdout = util.stdout;
-const stderr = util.stderr;
 
 pub fn main() !void {
     const gpa, const is_debug = gpa: {
@@ -18,6 +18,11 @@ pub fn main() !void {
     defer if (is_debug) {
         _ = debug_allocator.deinit();
     };
+
+    var threaded_io: Io.Threaded = .init(gpa);
+    defer threaded_io.deinit();
+
+    const io = threaded_io.io();
 
     var arena_impl: std.heap.ArenaAllocator = .init(gpa);
     defer arena_impl.deinit();
@@ -37,6 +42,14 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(arena);
 
+    var stdout_buf: [64]u8 = undefined;
+    var stdout_w = std.fs.File.stdout().writer(&stdout_buf);
+    const stdout: *std.Io.Writer = &stdout_w.interface;
+
+    var stderr_buf: [64]u8 = undefined;
+    var stderr_w = std.fs.File.stderr().writer(&stderr_buf);
+    const stderr: *Io.Writer = &stderr_w.interface;
+
     const parsed_args = try util.parseArgs(arena, args[1..]);
     switch (parsed_args) {
         .usage => |usage| {
@@ -44,7 +57,7 @@ pub fn main() !void {
             try stdout.flush();
         },
         .install => |install_args| {
-            try actions.install(gpa, install_args, &env);
+            try actions.install(io, gpa, install_args, &env);
         },
         .err_msg => |err_msg| {
             try stderr.print("error: {s}\n", .{err_msg});

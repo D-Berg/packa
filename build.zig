@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
         .root = lua_dep.path("src"),
         .files = lua_src_files,
     });
-    lua_lib.addIncludePath(lua_dep.path("src"));
+    lua_lib.root_module.addIncludePath(lua_dep.path("src"));
 
     const translate_lua = b.addTranslateC(.{
         .root_source_file = b.path("include.h"),
