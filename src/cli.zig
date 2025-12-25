@@ -5,13 +5,16 @@ const assert = std.debug.assert;
 pub const Command = union(enum) {
     install: InstallArgs,
     help: []const u8,
+    build: BuildArgs,
 
     pub fn deinit(self: *Command, gpa: Allocator) void {
+        _ = gpa;
         switch (self.*) {
             .install => |install| {
-                gpa.free(install.package_names);
+                _ = install;
             },
             .help => {},
+            .build => {},
         }
     }
 };
@@ -37,7 +40,7 @@ const ArgIterator = struct {
         return true;
     }
 
-    fn remaining(self: *ArgIterator) ?[]const u8 {
+    fn remaining(self: *ArgIterator) ?[]const []const u8 {
         if (self.idx >= self.args.len) return null;
         return self.args[self.idx..];
     }
@@ -54,6 +57,8 @@ pub fn parse(gpa: Allocator, args: []const []const u8, diag: ?*Diagnostic) !Comm
     const arg = arg_it.next() orelse return .{ .help = usage };
     if (std.mem.eql(u8, arg, "install")) {
         return try parseInstallArgs(&arg_it, gpa);
+    } else if (std.mem.eql(u8, arg, "build")) {
+        return try parseBuildArgs(&arg_it);
     }
 
     return error.UnknownCommand;
@@ -65,28 +70,42 @@ pub const InstallArgs = struct {
     build_from_source: bool,
 };
 fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
+    _ = gpa;
+
     var approved: bool = false;
     var build_from_source: bool = false;
 
-    var package_names: std.ArrayList([]const u8) = .empty;
-    errdefer package_names.deinit(gpa);
-
     while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "-h")) {
-            return .{ .help = "packa install <formula1> <formula2> ..." };
-        } else if (std.mem.eql(u8, arg, "-y") or std.mem.eql(u8, arg, "--yes")) {
-            approved = true;
-        } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--source")) {
-            build_from_source = true;
-        } else {
-            try package_names.append(gpa, arg);
-        }
+        if (std.mem.startsWith(u8, arg, "-")) {
+            if (std.mem.eql(u8, arg, "-h")) {
+                return .{ .help = "packa install <formula1> <formula2> ..." };
+            } else if (std.mem.eql(u8, arg, "-y") or std.mem.eql(u8, arg, "--yes")) {
+                approved = true;
+            } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--source")) {
+                build_from_source = true;
+            } else {
+                return error.UnknowInstallFlag;
+            }
+        } else break;
     }
 
+    const remaining = args.remaining() orelse
+        return error.MissingInstallPackages;
+
     return .{ .install = .{
-        .package_names = try package_names.toOwnedSlice(gpa),
+        .package_names = remaining,
         .build_from_source = true,
         .approved = approved,
+    } };
+}
+
+pub const BuildArgs = struct {
+    package_name: []const u8,
+};
+fn parseBuildArgs(args: *ArgIterator) !Command {
+    const package_name = args.next() orelse return error.BuildMissingPackageName;
+    return .{ .build = .{
+        .package_name = package_name,
     } };
 }
 

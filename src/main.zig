@@ -52,6 +52,9 @@ pub fn main() !void {
         .install => |install_args| {
             try actions.install(io, gpa, progress, &env, install_args);
         },
+        .build => |build_args| {
+            try actions.build(io, gpa, &env, build_args);
+        },
         .help => |help| {
             var stdout_buf: [64]u8 = undefined;
             var stdout_w = Io.File.stdout().writer(io, &stdout_buf);

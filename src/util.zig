@@ -82,6 +82,7 @@ pub fn saveSliceToFile(io: Io, dir: Io.Dir, file_name: []const u8, data: []const
     try file_writer.interface.flush();
 }
 
+/// Retreives Lua script `dir/formulas/<name[0]/{name}.lua`
 pub fn getLuaScript(io: Io, gpa: Allocator, dir: Io.Dir, name: []const u8) ![:0]const u8 {
     const script_path = try std.fmt.allocPrint(gpa, "formulas/{s}/{s}.lua", .{
         name[0..1], name,
