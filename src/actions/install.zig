@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const zlua = @import("zlua");
-const util = @import("util.zig");
+const util = @import("../util.zig");
 const InstallArgs = util.InstallArgs;
 const log = std.log;
 

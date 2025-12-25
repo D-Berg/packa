@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const Install = @import("Install.zig");
 
 pub const Argument = union(enum) {
     install: InstallArgs,

@@ -1,1 +1,1 @@
-pub const install = @import("install.zig").install;
+pub const install = @import("actions/install.zig").install;
