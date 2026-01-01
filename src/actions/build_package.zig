@@ -67,31 +67,28 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
 
     // local ctx = {}
     lua.newTable();
-    const ctx = lua.getTop();
-    std.debug.print("ctx = {d}\n", .{ctx});
-
-    var print_buf: [4096]u8 = undefined;
+    const b = lua.getTop();
 
     // ctx["os"] = builtin.os.tag
     _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.os.tag}));
-    lua.setField(ctx, "os");
+    lua.setField(b, "os");
 
     _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
-    lua.setField(ctx, "arch");
+    lua.setField(b, "arch");
 
     // TODO: actually provide a prefix;
     _ = lua.pushlString("prefix_tmp");
-    lua.setField(ctx, "prefix");
+    lua.setField(b, "prefix");
 
-    // ctx.run = luaRun
+    // b.run = luaRun
     lua.pushCFunction(luaRun);
-    lua.setField(ctx, "run");
+    lua.setField(b, "run");
 
     lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&io))));
-    lua.setField(ctx, "io");
+    lua.setField(b, "io");
 
     lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&gpa))));
-    lua.setField(ctx, "gpa");
+    lua.setField(b, "gpa");
 
     lua.newTable();
     const env_table = lua.getTop();
@@ -101,7 +98,8 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     lua.pushLightUserdata(@ptrCast(@alignCast(env)));
     lua.setField(env_table, "ud");
 
-    lua.setField(ctx, "env");
+    // b.env = env;
+    lua.setField(b, "env");
 
     // build(ctx)
     lua.pcall(1, 0, 0) catch |err| {
@@ -190,7 +188,6 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         switch (lua.typeOf(lua_idx)) { // pushes
             .string => argv[i] = lua.toLString(lua_idx),
             inline else => |t| {
-                lua.pop(1); // rawGeti
                 const err_msg = std.fmt.bufPrint(
                     &print_buf,
                     "Expected arg[{d}] be of type string, got {t}",
@@ -212,9 +209,10 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         return 2;
     };
 
-    const term = child.wait(io) catch {
+    const term = child.wait(io) catch |err| {
+        const err_msg = bufPrint(&print_buf, "{t}", .{err}) catch "WaitError";
         lua.pushNil();
-        _ = lua.pushlString("WaitError");
+        _ = lua.pushlString(err_msg);
         return 2;
     };
 
