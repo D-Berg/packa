@@ -45,6 +45,7 @@ pub fn confirm(io: Io, prompt: []const u8, retries: usize) !bool {
     return false;
 }
 
+// TODO: rename to fetch_alloc
 pub fn fetch(io: Io, gpa: Allocator, url: []const u8) ![]const u8 {
     var client: std.http.Client = .{ .io = io, .allocator = gpa };
     defer client.deinit();

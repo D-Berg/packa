@@ -63,5 +63,6 @@ pub fn main() !void {
             try stdout.print("{s}\n", .{help});
             try stdout.flush();
         },
+        // TODO: info
     }
 }
