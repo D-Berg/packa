@@ -101,11 +101,15 @@ fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
 
 pub const BuildArgs = struct {
     package_name: []const u8,
+    prefix_path: []const u8,
 };
 fn parseBuildArgs(args: *ArgIterator) !Command {
     const package_name = args.next() orelse return error.BuildMissingPackageName;
+    assert(args.skip());
+    const prefix_path = args.next() orelse return error.BuildMissingPrefix;
     return .{ .build = .{
         .package_name = package_name,
+        .prefix_path = prefix_path,
     } };
 }
 

@@ -63,12 +63,11 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     try lua.pcall(0, 1, 0);
 
     const pkg = lua.getTop();
-    const name = switch (lua.getField(pkg, "name")) {
+    const pkg_name = switch (lua.getField(pkg, "name")) {
         .string => lua.toLString(-1),
         else => return error.WrongLuaType,
     };
-
-    log.debug("name = {s}", .{name});
+    log.debug("name = {s}", .{pkg_name});
 
     const src_url = switch (lua.getField(pkg, "url")) {
         .string => lua.toLString(-1),
@@ -82,68 +81,75 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     };
     log.debug("pkg_hash: {s}", .{pkg_hash});
 
+    const pkg_version = switch (lua.getField(pkg, "version")) {
+        .string => lua.toLString(-1),
+        else => return error.WrongLuaType,
+    };
+    log.debug("pkg_version: {s}", .{pkg_version});
+
     // use for temporary strings
     var print_buf: [4096]u8 = undefined;
 
-    const tar_file_name = src_url[1 + std.mem.findScalarLast(u8, src_url, '/').? ..];
-    const is_cached = if (cache_dir.access(io, tar_file_name, .{})) true else |_| false;
-    if (!is_cached) {
-        const file = try cache_dir.createFile(io, tar_file_name, .{});
-        defer file.close(io);
+    if (cache_dir.access(io, "build", .{})) {
+        try cache_dir.deleteTree(io, "build");
+    } else |_| {}
 
-        var file_writer_buf: [4096]u8 = undefined;
-        var file_writer = file.writer(io, &file_writer_buf);
+    const build_dir = try cache_dir.createDirPathOpen(io, "build", .{});
+    defer build_dir.close(io);
 
-        const bytes = try util.fetch(io, gpa, src_url);
-        defer gpa.free(bytes);
+    const tar_root_dir_path = try util.unpackSource(io, gpa, cache_dir, src_url, pkg_hash, build_dir);
+    defer gpa.free(tar_root_dir_path);
 
-        // TODO: verify hash
-
-        var reader: Io.Reader = .fixed(bytes);
-
-        assert(try reader.streamRemaining(&file_writer.interface) == bytes.len);
-    }
-
-    log.debug("cache contains {s}: {}", .{ tar_file_name, is_cached });
+    const tar_root_dir = try build_dir.openDir(io, tar_root_dir_path, .{});
+    defer tar_root_dir.close(io);
 
     if (lua.getField(pkg, "build") != .function) {
         log.err("build need to be a function", .{});
         return error.WrongLuaType;
     }
 
-    { // create b = Build{}
-        lua.createTable(0, 5);
-        const b = lua.getTop();
+    // create b = Build{}
+    lua.createTable(0, 5);
+    const b = lua.getTop();
 
-        // b.os = builtin.os.tag
-        _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.os.tag}));
-        lua.setField(b, "os");
+    // b.os = builtin.os.tag
+    _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.os.tag}));
+    lua.setField(b, "os");
 
-        // b.arch = builtin.cpu.arch
-        _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
-        lua.setField(b, "arch");
+    // b.arch = builtin.cpu.arch
+    _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
+    lua.setField(b, "arch");
 
-        // TODO: actually provide a prefix;
-        _ = lua.pushlString("prefix_tmp");
-        lua.setField(b, "prefix");
-
-        { // b.run = luaRun
-            lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&io))));
-            lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&gpa))));
-            lua.pushCClosure(luaRun, 2);
-            lua.setField(b, "run");
+    const prefix_path = blk: {
+        if (Io.Dir.path.isAbsolute(args.prefix_path)) {
+            break :blk lua.pushlString(args.prefix_path);
+        } else {
+            var cwd_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+            const cwd_path = try std.process.getCwd(&cwd_buf);
+            const prefix_path = try bufPrint(&print_buf, "{s}/{s}", .{ cwd_path, args.prefix_path });
+            break :blk lua.pushlString(prefix_path);
         }
+    };
+    lua.setField(b, "prefix");
 
-        { // b.env = env;
-            lua.createTable(0, 1);
-            const env_table = lua.getTop();
+    { // b.run = luaRun
+        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&io))));
+        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&gpa))));
+        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&tar_root_dir))));
+        lua.pushLightUserdata(@ptrCast(@alignCast(env)));
+        lua.pushCClosure(luaRun, 4);
+        lua.setField(b, "run");
+    }
 
-            lua.pushLightUserdata(@ptrCast(@alignCast(env)));
-            lua.pushCClosure(luaEnvSet, 1);
-            lua.setField(env_table, "set");
+    { // b.env = env;
+        lua.createTable(0, 1);
+        const env_table = lua.getTop();
 
-            lua.setField(b, "env");
-        }
+        lua.pushLightUserdata(@ptrCast(@alignCast(env)));
+        lua.pushCClosure(luaEnvSet, 1);
+        lua.setField(env_table, "set");
+
+        lua.setField(b, "env");
     }
 
     // call pkg.build(b)
@@ -153,6 +159,11 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
         log.err("{s}", .{err_msg});
         return err;
     };
+
+    log.info(
+        "Successfully built {s}-{s} located at {s}",
+        .{ pkg_name, pkg_version, prefix_path },
+    );
 }
 
 // TODO: type check args and check number of args supplied by lua
@@ -186,7 +197,7 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
     return 1;
 }
 
-/// `luaRun(io: Io, gpa: Allocator, args: []const u8)`
+/// `luaRun(io: Io, gpa: Allocator, cwd_dir: Io.Dir, env: *std.process.EnvMap, args: []const u8)`
 fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
 
@@ -215,6 +226,21 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const gpa_ptr: *const Allocator = @ptrCast(@alignCast(gpa_ud));
     const gpa = gpa_ptr.*;
 
+    const cwd_dir_ud = lua.toUserdata(lua.upvalueIndex(3)) orelse {
+        lua.pushNil();
+        _ = lua.pushlString("cwd_dir userdata was null");
+        return 2;
+    };
+    const dir_cwd_ptr: *const Io.Dir = @ptrCast(@alignCast(cwd_dir_ud));
+    const cwd_dir = dir_cwd_ptr.*;
+
+    const env_ud = lua.toUserdata(lua.upvalueIndex(4)) orelse {
+        lua.pushNil();
+        _ = lua.pushlString("env userdata was null");
+        return 2;
+    };
+    const env: *const std.process.EnvMap = @ptrCast(@alignCast(env_ud));
+
     const argv = gpa.alloc([]const u8, n_args) catch |err| {
         std.debug.panic("{t}", .{err});
     };
@@ -241,6 +267,8 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     log.debug("runing {s}", .{argv[0]});
     var child = std.process.Child.init(argv, gpa);
+    child.cwd_dir = cwd_dir;
+    child.env_map = env;
     child.spawn(io) catch {
         lua.pushNil();
         _ = lua.pushlString("SpawnError");
