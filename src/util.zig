@@ -118,3 +118,15 @@ pub fn checkSignature(gpa: Allocator, bytes: []const u8, minisig: []const u8) !b
 
     return true;
 }
+
+pub fn calcHash(in: []const u8) [64]u8 {
+    var blake3 = std.crypto.hash.Blake3.init(.{});
+    blake3.update(in);
+
+    var hash: [32]u8 = undefined;
+    blake3.final(&hash);
+
+    var hash_buf: [2 * hash.len]u8 = undefined;
+    _ = std.fmt.bufPrint(&hash_buf, "{x}", .{hash[0..]}) catch unreachable;
+    return hash_buf;
+}
