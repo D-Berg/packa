@@ -46,29 +46,35 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     lua.pushNil();
     lua.setGlobal("dofile");
 
+    { // create global Package with Package.new()
+        lua.createTable(0, 1);
+        const package_idx = lua.getTop();
+        lua.pushCFunction(luaPackageNew);
+        lua.setField(package_idx, "new");
+        lua.setGlobal("Package");
+    }
+
     var lua_script_name_buf: [128]u8 = undefined;
     const lua_script_name = try std.fmt.bufPrintZ(&lua_script_name_buf, "@{s}.lua", .{args.package_name});
 
     try lua.loadBuffer(manifest, lua_script_name);
     try lua.pcall(0, 1, 0);
 
-    const manifest_idx = lua.getTop();
-    std.debug.print("manifest_idx = {d}\n", .{manifest_idx});
-
-    const name = switch (lua.getField(manifest_idx, "name")) {
+    const pkg = lua.getTop();
+    const name = switch (lua.getField(pkg, "name")) {
         .string => lua.toLString(-1),
         else => return error.WrongLuaType,
     };
 
     std.debug.print("name = {s}\n", .{name});
 
-    const src_url = switch (lua.getField(manifest_idx, "url")) {
+    const src_url = switch (lua.getField(pkg, "url")) {
         .string => lua.toLString(-1),
         else => return error.WrongLuaType,
     };
     std.debug.print("src_url: {s}\n", .{src_url});
 
-    const pkg_hash = switch (lua.getField(manifest_idx, "hash")) {
+    const pkg_hash = switch (lua.getField(pkg, "hash")) {
         .string => lua.toLString(-1),
         else => return error.WrongLuaType,
     };
@@ -98,48 +104,47 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
 
     std.debug.print("cache contains {s}: {}\n", .{ tar_file_name, is_cached });
 
-    if (lua.getField(manifest_idx, "build") != .function) {
+    if (lua.getField(pkg, "build") != .function) {
         std.debug.print("lua: build is not a function\n", .{});
         return error.WrongLuaType;
     }
 
-    // local ctx = {}
-    lua.newTable();
-    const b = lua.getTop();
+    { // create b = Build{}
+        lua.createTable(0, 5);
+        const b = lua.getTop();
 
-    // ctx["os"] = builtin.os.tag
-    _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.os.tag}));
-    lua.setField(b, "os");
+        // b.os = builtin.os.tag
+        _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.os.tag}));
+        lua.setField(b, "os");
 
-    _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
-    lua.setField(b, "arch");
+        // b.arch = builtin.cpu.arch
+        _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
+        lua.setField(b, "arch");
 
-    // TODO: actually provide a prefix;
-    _ = lua.pushlString("prefix_tmp");
-    lua.setField(b, "prefix");
+        // TODO: actually provide a prefix;
+        _ = lua.pushlString("prefix_tmp");
+        lua.setField(b, "prefix");
 
-    // b.run = luaRun
-    lua.pushCFunction(luaRun);
-    lua.setField(b, "run");
+        { // b.run = luaRun
+            lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&io))));
+            lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&gpa))));
+            lua.pushCClosure(luaRun, 2);
+            lua.setField(b, "run");
+        }
 
-    lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&io))));
-    lua.setField(b, "io");
+        { // b.env = env;
+            lua.createTable(0, 1);
+            const env_table = lua.getTop();
 
-    lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&gpa))));
-    lua.setField(b, "gpa");
+            lua.pushLightUserdata(@ptrCast(@alignCast(env)));
+            lua.pushCClosure(luaEnvSet, 1);
+            lua.setField(env_table, "set");
 
-    lua.newTable();
-    const env_table = lua.getTop();
-    lua.pushCFunction(luaEnvSet);
-    lua.setField(env_table, "set");
+            lua.setField(b, "env");
+        }
+    }
 
-    lua.pushLightUserdata(@ptrCast(@alignCast(env)));
-    lua.setField(env_table, "ud");
-
-    // b.env = env;
-    lua.setField(b, "env");
-
-    // build(ctx)
+    // call pkg.build(b)
     lua.pcall(1, 0, 0) catch |err| {
         // TODO: run cleanup
         return err;
@@ -151,79 +156,63 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
     std.debug.print("lua called: lua_env_set\n", .{});
     const lua: zlua.State = .{ .inner = state.? };
 
-    assert(lua.getField(1, "ud") == .light_userdata);
-    const ud = lua.toUserdata(-1) orelse {
-        lua.pop(1);
+    const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
         lua.pushBoolean(false);
         _ = lua.pushlString("null userdata");
         return 2;
     };
-    lua.pop(1); // restore stack
     const env_map: *std.process.EnvMap = @ptrCast(@alignCast(ud));
 
-    const key = lua.toLString(2);
-    const value = lua.toLString(3);
+    const key = lua.toLString(1);
+    const value = lua.toLString(2);
 
-    env_map.put(key, value) catch |err| {
-        std.debug.panic("{t}", .{err});
+    env_map.put(key, value) catch {
+        lua.pushBoolean(false);
+        _ = lua.pushlString("OOM");
+        return 2;
     };
 
     lua.pushBoolean(true);
     return 1;
 }
 
+/// `luaRun(io: Io, gpa: Allocator, args: []const u8)`
 fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
 
     var print_buf: [128]u8 = undefined;
 
     const n_args: usize = @intCast(lua.getTop());
-    std.debug.print("run got called with {d} args\n", .{n_args});
-
-    if (n_args < 2) {
+    if (n_args < 1) {
         lua.pushNil();
-        _ = lua.pushlString("Too few arguments");
+        _ = lua.pushlString("run requires atleast 1 arg");
         return 2;
     }
 
-    if (lua.typeOf(1) != .table) {
-        lua.pushNil();
-        _ = lua.pushlString("First argument neeed to be a table, try ctx:run instead");
-        return 2;
-    }
-
-    const ctx = 1;
-    assert(lua.getField(ctx, "io") == .light_userdata);
-    const io_ud = lua.toUserdata(-1) orelse {
-        lua.pop(1);
+    const io_ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
         lua.pushNil();
         _ = lua.pushlString("io userdata was null");
         return 2;
     };
-    lua.pop(1); // restore stack
     const io_ptr: *const Io = @ptrCast(@alignCast(io_ud));
     const io = io_ptr.*;
 
-    assert(lua.getField(ctx, "gpa") == .light_userdata);
-    const gpa_ud = lua.toUserdata(-1) orelse {
-        lua.pop(1);
+    const gpa_ud = lua.toUserdata(lua.upvalueIndex(2)) orelse {
         lua.pushNil();
         _ = lua.pushlString("gpa userdata was null");
         return 2;
     };
-    lua.pop(1); // restore stack
-
     const gpa_ptr: *const Allocator = @ptrCast(@alignCast(gpa_ud));
     const gpa = gpa_ptr.*;
 
-    const argv = gpa.alloc([]const u8, n_args - 1) catch |err| {
+    const argv = gpa.alloc([]const u8, n_args) catch |err| {
         std.debug.panic("{t}", .{err});
     };
     defer gpa.free(argv);
 
     for (0..argv.len) |i| {
-        const lua_idx: isize = @intCast(i + 2);
-        switch (lua.typeOf(lua_idx)) { // pushes
+        const lua_idx: isize = @intCast(i + 1);
+        switch (lua.typeOf(lua_idx)) {
             .string => argv[i] = lua.toLString(lua_idx),
             inline else => |t| {
                 const err_msg = std.fmt.bufPrint(
@@ -257,5 +246,14 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     std.debug.print("child exited with term: {t}({d})\n", .{ term, term.Exited });
 
     lua.pushBoolean(true);
+    return 1;
+}
+
+/// function Package.new()
+///     return table.create(0, 6)
+/// end
+fn luaPackageNew(state: ?*zlua.LuaState) callconv(.c) c_int {
+    const lua: zlua.State = .{ .inner = state.? };
+    lua.createTable(0, 6);
     return 1;
 }
