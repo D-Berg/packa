@@ -4,8 +4,10 @@ const cli = @import("../cli.zig");
 const util = @import("../util.zig");
 const zlua = @import("zlua");
 const assert = std.debug.assert;
+const log = std.log.scoped(.build);
 
 const bufPrint = std.fmt.bufPrint;
+const bufPrintZ = std.fmt.bufPrintZ;
 
 const BuildArgs = cli.BuildArgs;
 
@@ -32,7 +34,7 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     const manifest = try util.getLuaScript(io, gpa, packa_dir, args.package_name);
     defer gpa.free(manifest);
 
-    std.debug.print("manifest: \n\n{s}\n\n", .{manifest});
+    log.debug("manifest: \n\n{s}\n\n", .{manifest});
 
     var lua: zlua.State = .{ .gpa = gpa };
     try lua.new(0);
@@ -55,7 +57,7 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     }
 
     var lua_script_name_buf: [128]u8 = undefined;
-    const lua_script_name = try std.fmt.bufPrintZ(&lua_script_name_buf, "@{s}.lua", .{args.package_name});
+    const lua_script_name = try bufPrintZ(&lua_script_name_buf, "@{s}.lua", .{args.package_name});
 
     try lua.loadBuffer(manifest, lua_script_name);
     try lua.pcall(0, 1, 0);
@@ -66,19 +68,19 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
         else => return error.WrongLuaType,
     };
 
-    std.debug.print("name = {s}\n", .{name});
+    log.debug("name = {s}", .{name});
 
     const src_url = switch (lua.getField(pkg, "url")) {
         .string => lua.toLString(-1),
         else => return error.WrongLuaType,
     };
-    std.debug.print("src_url: {s}\n", .{src_url});
+    log.debug("src_url: {s}", .{src_url});
 
     const pkg_hash = switch (lua.getField(pkg, "hash")) {
         .string => lua.toLString(-1),
         else => return error.WrongLuaType,
     };
-    std.debug.print("pkg_hash: {s}\n", .{pkg_hash});
+    log.debug("pkg_hash: {s}", .{pkg_hash});
 
     // use for temporary strings
     var print_buf: [4096]u8 = undefined;
@@ -102,10 +104,10 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
         assert(try reader.streamRemaining(&file_writer.interface) == bytes.len);
     }
 
-    std.debug.print("cache contains {s}: {}\n", .{ tar_file_name, is_cached });
+    log.debug("cache contains {s}: {}", .{ tar_file_name, is_cached });
 
     if (lua.getField(pkg, "build") != .function) {
-        std.debug.print("lua: build is not a function\n", .{});
+        log.err("build need to be a function", .{});
         return error.WrongLuaType;
     }
 
@@ -153,7 +155,6 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
 
 // TODO: type check args and check number of args supplied by lua
 fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
-    std.debug.print("lua called: lua_env_set\n", .{});
     const lua: zlua.State = .{ .inner = state.? };
 
     const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
@@ -171,6 +172,8 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
         _ = lua.pushlString("OOM");
         return 2;
     };
+
+    log.debug("env {s} = {s}", .{ key, value });
 
     lua.pushBoolean(true);
     return 1;
@@ -229,6 +232,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         }
     }
 
+    log.debug("runing {s}", .{argv[0]});
     var child = std.process.Child.init(argv, gpa);
     child.spawn(io) catch {
         lua.pushNil();
@@ -243,7 +247,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         return 2;
     };
 
-    std.debug.print("child exited with term: {t}({d})\n", .{ term, term.Exited });
+    log.debug("child exited with term: {t}({d})\n", .{ term, term.Exited });
 
     lua.pushBoolean(true);
     return 1;
