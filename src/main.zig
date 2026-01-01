@@ -7,6 +7,11 @@ const minizign = @import("minizign");
 
 const Io = std.Io;
 
+const fast_exit = switch (builtin.mode) {
+    .Debug, .ReleaseSafe => false,
+    .ReleaseFast, .ReleaseSmall => true,
+};
+
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 const log = std.log;
 
@@ -53,7 +58,10 @@ pub fn main() !void {
             try actions.install(io, gpa, progress, &env, install_args);
         },
         .build => |build_args| {
-            try actions.build(io, gpa, &env, build_args);
+            actions.build(io, gpa, &env, build_args) catch |err| {
+                if (fast_exit) std.process.exit(1);
+                return err;
+            };
         },
         .help => |help| {
             var stdout_buf: [64]u8 = undefined;
