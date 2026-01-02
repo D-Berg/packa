@@ -158,6 +158,11 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
 // TODO: type check args and check number of args supplied by lua
 fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
+    if (lua.getTop() != 2) {
+        lua.pushNil();
+        _ = lua.pushlString("Package.env requires 2 args, key and value");
+        return 2;
+    }
 
     const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
         lua.pushBoolean(false);
@@ -170,7 +175,7 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
     const value = lua.toLString(2);
 
     env_map.put(key, value) catch {
-        lua.pushBoolean(false);
+        lua.pushNil();
         _ = lua.pushlString("OOM");
         return 2;
     };
