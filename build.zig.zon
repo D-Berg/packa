@@ -3,7 +3,8 @@
     .version = "0.0.1",
     .dependencies = .{
         .zlua = .{
-            .path = "../zlua",
+            .url = "git+https://github.com/d-berg/zlua#c586705d809c5ec8ede5b94cd50886fdcf634ab9",
+            .hash = "zlua-5.5.0-raq1bQ9AAADSnrGI5sz58e4UvU3Bb21XblpYrhFD5t9u",
         },
         .minizign = .{
             .url = "git+https://github.com/jedisct1/zig-minisign.git#6dc959ae4a80ce13f6ca4db7a8915bee6d34d24c",
