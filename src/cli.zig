@@ -10,13 +10,11 @@ pub const Command = union(enum) {
     version: []const u8,
 
     pub fn deinit(self: *Command, gpa: Allocator) void {
-        _ = gpa;
         switch (self.*) {
             .install => |install| {
-                _ = install;
+                gpa.free(install.package_names);
             },
-            .help => {},
-            .build => {},
+            .help, .build, .version => {},
         }
     }
 };
@@ -74,10 +72,11 @@ pub const InstallArgs = struct {
     build_from_source: bool,
 };
 fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
-    _ = gpa;
-
     var approved: bool = false;
     var build_from_source: bool = false;
+
+    var package_names: std.ArrayList([]const u8) = .empty;
+    errdefer package_names.deinit(gpa);
 
     while (args.next()) |arg| {
         if (std.mem.startsWith(u8, arg, "-")) {
@@ -90,14 +89,11 @@ fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
             } else {
                 return error.UnknowInstallFlag;
             }
-        } else break;
+        } else try package_names.append(gpa, arg);
     }
 
-    const remaining = args.remaining() orelse
-        return error.MissingInstallPackages;
-
     return .{ .install = .{
-        .package_names = remaining,
+        .package_names = try package_names.toOwnedSlice(gpa),
         .build_from_source = true,
         .approved = approved,
     } };
