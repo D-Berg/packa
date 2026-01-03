@@ -44,12 +44,6 @@ pub fn main() !void {
         return err;
     };
 
-    if (env.get("EDITOR")) |editor| {
-        std.debug.print("editor = {s}\n", .{editor});
-    } else {
-        log.err("couldnt find editor env var\n", .{});
-    }
-
     const args = try std.process.argsAlloc(arena);
 
     const command = try cli.parse(arena, args, null);
