@@ -7,8 +7,8 @@ const Io = std.Io;
 const zlua = @import("zlua");
 const util = @import("../util.zig");
 const cli = @import("../cli.zig");
-const log = std.log;
 const lua_helpers = @import("../lua_helpers.zig");
+const log = std.log.scoped(.install);
 
 pub fn install(
     io: Io,
@@ -149,6 +149,6 @@ const Package = struct {
             return error.InvalidSignature;
         }
 
-        std.debug.print("package signature matches\n", .{});
+        log.debug("package signature matches\n", .{});
     }
 };
