@@ -48,7 +48,7 @@ pub fn install(
         try packages[i].tryFetch(io, gpa, home_dir);
     }
 
-    fetch_group.wait(io);
+    try fetch_group.await(io);
     std.debug.print("finished installing\n", .{});
 
     // for (args.package_names) |name| {
