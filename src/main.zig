@@ -46,6 +46,10 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(arena);
 
+    var stdout_buf: [64]u8 = undefined;
+    var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
+    const stdout: *std.Io.Writer = &stdout_w.interface;
+
     const command = try cli.parse(arena, args, null);
     switch (command) {
         .install => |install_args| {
@@ -57,12 +61,8 @@ pub fn main() !void {
                 return err;
             };
         },
-        .help => |help| {
-            var stdout_buf: [64]u8 = undefined;
-            var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
-            const stdout: *std.Io.Writer = &stdout_w.interface;
-
-            try stdout.print("{s}\n", .{help});
+        .help, .version => |str| {
+            try stdout.print("{s}\n", .{str});
             try stdout.flush();
         },
         // TODO: info

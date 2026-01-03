@@ -1,6 +1,6 @@
 .{
     .name = .packa,
-    .version = "0.0.1",
+    .version = "0.1.0",
     .dependencies = .{
         .zlua = .{
             .url = "git+https://github.com/d-berg/zlua#c586705d809c5ec8ede5b94cd50886fdcf634ab9",

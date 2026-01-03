@@ -1,11 +1,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+const build_options = @import("build_options");
 
 pub const Command = union(enum) {
     install: InstallArgs,
     help: []const u8,
     build: BuildArgs,
+    version: []const u8,
 
     pub fn deinit(self: *Command, gpa: Allocator) void {
         _ = gpa;
@@ -59,6 +61,8 @@ pub fn parse(gpa: Allocator, args: []const []const u8, diag: ?*Diagnostic) !Comm
         return try parseInstallArgs(&arg_it, gpa);
     } else if (std.mem.eql(u8, arg, "build")) {
         return try parseBuildArgs(&arg_it);
+    } else if (std.mem.eql(u8, arg, "version")) {
+        return .{ .version = build_options.version };
     }
 
     return error.UnknownCommand;
