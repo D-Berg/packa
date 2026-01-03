@@ -85,7 +85,7 @@ const Package = struct {
         self.lua.close();
     }
 
-    /// Fetch a package and save it in cache if it is signed
+    /// Fetch a binary package and save it in cache if it is signed
     fn tryFetch(self: *Package, io: Io, gpa: Allocator, home_dir: Io.Dir) !void {
         const lua = self.lua;
 
@@ -96,15 +96,20 @@ const Package = struct {
         defer gpa.free(manifest);
 
         lua_helpers.setupState(&lua);
-        try lua.loadString(manifest);
-        try lua.pcallk(0, 1, 0, 0, null);
 
-        const lua_name = switch (lua.getField(-1, "name")) {
+        try lua.loadString(manifest);
+        lua.pcall(0, 1, 0) catch {
+            log.err("{s}", .{lua.toLString(-1)});
+            return error.ManifestCrash;
+        };
+
+        const pkg = lua.getTop();
+        const lua_name = switch (lua.getField(pkg, "name")) {
             .string => lua.toLString(-1),
             else => return error.WrongLuaType,
         };
 
-        const version = switch (lua.getField(-2, "version")) {
+        const version = switch (lua.getField(pkg, "version")) {
             .string => lua.toLString(-1),
             else => return error.WrongLuaType,
         };
@@ -117,28 +122,28 @@ const Package = struct {
         const name = self.name;
 
         var fetch_progress_name_buf: [256]u8 = undefined;
-        const fetch_progrss = self.progress.start(try std.fmt.bufPrint(
-            &fetch_progress_name_buf,
-            "fetching: {s}",
-            .{name},
-        ), 1);
+        const fetch_progrss = self.progress.start(
+            try std.fmt.bufPrint(&fetch_progress_name_buf, "fetching: {s}", .{name}),
+            1,
+        );
         defer fetch_progrss.end();
 
         const base_url = "http://localhost:8000";
         const binary_url = try std.fmt.allocPrint(
             gpa,
-            "{s}/{s}/{s}/{s}-{t}-{t}.tar.gz",
-            .{ base_url, name, version, name, builtin.target.cpu.arch, builtin.os.tag },
+            "{s}/{s}/{s}/{s}-{s}-{t}-{t}.tar.gz",
+            .{ base_url, name, version, name, version, builtin.target.cpu.arch, builtin.os.tag },
         );
         defer gpa.free(binary_url);
 
         const minisig_url = try std.fmt.allocPrint(
             gpa,
-            "{s}/{s}/{s}/{s}-{t}-{t}.tar.gz.minisig",
-            .{ base_url, name, version, name, builtin.target.cpu.arch, builtin.os.tag },
+            "{s}/{s}/{s}/{s}-{s}-{t}-{t}.tar.gz.minisig",
+            .{ base_url, name, version, name, version, builtin.target.cpu.arch, builtin.os.tag },
         );
         defer gpa.free(minisig_url);
 
+        // TODO: AASYYYNC
         const archive = try util.fetch(io, gpa, binary_url);
         defer gpa.free(archive);
 
