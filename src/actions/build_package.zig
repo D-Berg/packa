@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const cli = @import("../cli.zig");
 const util = @import("../util.zig");
+const lua_helpers = @import("../lua_helpers.zig");
 const zlua = @import("zlua");
 const assert = std.debug.assert;
 const log = std.log.scoped(.build);
@@ -42,19 +43,7 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
 
     lua.requiref("_G", zlua.Lib.base, true);
 
-    lua.setGlobal("load");
-    lua.pushNil();
-    lua.setGlobal("loadfile");
-    lua.pushNil();
-    lua.setGlobal("dofile");
-
-    { // create global Package with Package.new()
-        lua.createTable(0, 1);
-        const package_idx = lua.getTop();
-        lua.pushCFunction(luaPackageNew);
-        lua.setField(package_idx, "new");
-        lua.setGlobal("Package");
-    }
+    lua_helpers.setupState(&lua);
 
     var lua_script_name_buf: [128]u8 = undefined;
     const lua_script_name = try bufPrintZ(&lua_script_name_buf, "@{s}.lua", .{args.package_name});
@@ -285,14 +274,5 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     log.debug("child exited with term: {t}({d})\n", .{ term, term.Exited });
 
     lua.pushBoolean(true);
-    return 1;
-}
-
-/// function Package.new()
-///     return table.create(0, 6)
-/// end
-fn luaPackageNew(state: ?*zlua.LuaState) callconv(.c) c_int {
-    const lua: zlua.State = .{ .inner = state.? };
-    lua.createTable(0, 6);
     return 1;
 }

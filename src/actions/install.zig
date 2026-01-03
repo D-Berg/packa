@@ -8,6 +8,7 @@ const zlua = @import("zlua");
 const util = @import("../util.zig");
 const cli = @import("../cli.zig");
 const log = std.log;
+const lua_helpers = @import("../lua_helpers.zig");
 
 pub fn install(
     io: Io,
@@ -94,6 +95,7 @@ const Package = struct {
         const manifest = try util.getLuaScript(io, gpa, packa_dir, self.name);
         defer gpa.free(manifest);
 
+        lua_helpers.setupState(&lua);
         try lua.loadString(manifest);
         try lua.pcallk(0, 1, 0, 0, null);
 
