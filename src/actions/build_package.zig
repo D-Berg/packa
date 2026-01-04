@@ -16,23 +16,20 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) !void {
-    const home_dir_path = env.get("HOME") orelse {
-        return error.MissingHomeEnv;
-    };
 
-    var home_dir = try Io.Dir.cwd().openDir(io, home_dir_path, .{});
-    defer home_dir.close(io);
+    // use for temporary strings
+    var print_buf: [4096]u8 = undefined;
 
-    const packa_dir = try home_dir.openDir(io, ".local/share/packa", .{});
+    const packa_dir = try Io.Dir.cwd().openDir(io, "/opt/packa", .{});
     defer packa_dir.close(io);
 
-    const cache_dir = home_dir.openDir(io, ".cache/packa", .{}) catch blk: {
-        try home_dir.createDirPath(io, ".cache/packa");
-        break :blk try home_dir.openDir(io, ".cache/packa", .{});
-    };
+    const cache_dir = try packa_dir.openDir(io, "cache", .{});
     defer cache_dir.close(io);
 
-    const manifest = try util.getLuaScript(io, gpa, packa_dir, args.package_name);
+    const tmp_dir = try packa_dir.openDir(io, "tmp", .{});
+    defer tmp_dir.close(io);
+
+    const manifest = try util.getManifest(io, gpa, packa_dir, args.package_name);
     defer gpa.free(manifest);
 
     log.debug("manifest: \n\n{s}\n\n", .{manifest});
@@ -41,13 +38,14 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     try lua.new(0);
     defer lua.close();
 
-    lua.requiref("_G", zlua.Lib.base, true);
-
     lua_helpers.setupState(&lua);
 
-    var lua_script_name_buf: [128]u8 = undefined;
-    const lua_script_name = try bufPrintZ(&lua_script_name_buf, "@{s}.lua", .{args.package_name});
-
+    var lua_script_name_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const lua_script_name = try bufPrintZ(
+        &lua_script_name_buf,
+        "@/opt/packa/repos/core/{c}/{s}.lua",
+        .{ args.package_name[0], args.package_name },
+    );
     try lua.loadBuffer(manifest, lua_script_name);
     try lua.pcall(0, 1, 0);
 
@@ -76,14 +74,11 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     };
     log.debug("pkg_version: {s}", .{pkg_version});
 
-    // use for temporary strings
-    var print_buf: [4096]u8 = undefined;
-
-    if (cache_dir.access(io, "build", .{})) {
-        try cache_dir.deleteTree(io, "build");
-    } else |_| {}
-
-    const build_dir = try cache_dir.createDirPathOpen(io, "build", .{});
+    const build_dir = try tmp_dir.createDirPathOpen(
+        io,
+        try bufPrint(&print_buf, "build-{s}-{s}", .{ pkg_name, pkg_version }),
+        .{},
+    );
     defer build_dir.close(io);
 
     const tar_root_dir_path = try util.unpackSource(io, gpa, cache_dir, src_url, pkg_hash, build_dir);
@@ -109,8 +104,12 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
     lua.setField(b, "arch");
 
-    const prefix_path = blk: {
+    const prefix_path = blk: { // push prefix to lua state
         if (Io.Dir.path.isAbsolute(args.prefix_path)) {
+            if (std.mem.eql(u8, args.prefix_path, "/opt/packa/tmp")) {
+                const prefix_path = try bufPrint(&print_buf, "{s}/{s}-{s}", .{ args.prefix_path, pkg_name, pkg_version });
+                break :blk lua.pushlString(prefix_path);
+            }
             break :blk lua.pushlString(args.prefix_path);
         } else {
             var cwd_buf: [Io.Dir.max_path_bytes]u8 = undefined;

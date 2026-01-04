@@ -85,9 +85,10 @@ pub fn saveSliceToFile(io: Io, dir: Io.Dir, file_name: []const u8, data: []const
     try file_writer.interface.flush();
 }
 
-/// Retreives Lua script `dir/manifests/<name[0]/{name}.lua`
-pub fn getLuaScript(io: Io, gpa: Allocator, dir: Io.Dir, name: []const u8) ![:0]const u8 {
-    const script_path = try std.fmt.allocPrint(gpa, "manifests/{s}/{s}.lua", .{
+/// Retreives Lua script `repos/<repo>/manifests/<name[0]/{name}.lua`
+pub fn getManifest(io: Io, gpa: Allocator, dir: Io.Dir, name: []const u8) ![:0]const u8 {
+    // TODO: seach all repos and not just core
+    const script_path = try std.fmt.allocPrint(gpa, "repos/core/manifests/{s}/{s}.lua", .{
         name[0..1], name,
     });
     defer gpa.free(script_path);

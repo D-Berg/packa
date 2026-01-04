@@ -111,13 +111,19 @@ pub const BuildArgs = struct {
     prefix_path: []const u8,
 };
 fn parseBuildArgs(args: *ArgIterator) !Command {
-    const package_name = args.next() orelse return error.BuildMissingPackageName;
-    assert(args.skip());
-    const prefix_path = args.next() orelse return error.BuildMissingPrefix;
-    return .{ .build = .{
-        .package_name = package_name,
-        .prefix_path = prefix_path,
-    } };
+    var build_args: BuildArgs = .{
+        .package_name = undefined,
+        .prefix_path = "/opt/packa/tmp",
+    };
+    build_args.package_name = args.next() orelse return error.BuildMissingPackageName;
+
+    var next = args.next() orelse return .{ .build = build_args };
+    if (eql(next, "-p") or eql(next, "--prefix")) {
+        next = args.next() orelse return error.BuildMissingPrefixPath;
+        build_args.prefix_path = next;
+    }
+
+    return .{ .build = build_args };
 }
 
 pub const usage =

@@ -48,7 +48,7 @@ pub fn main() !void {
     switch (command) {
         .install => |install_args| {
             checkSetup(io);
-            actions.install(io, gpa, progress, &env, install_args) catch |err| {
+            actions.install(io, gpa, progress, install_args) catch |err| {
                 fastExit(1);
                 return err;
             };

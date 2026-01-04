@@ -14,20 +14,12 @@ pub fn install(
     io: Io,
     gpa: Allocator,
     progress: std.Progress.Node,
-    env: *std.process.EnvMap,
     args: cli.InstallArgs,
 ) !void {
     var arena_impl: std.heap.ArenaAllocator = .init(gpa);
     defer arena_impl.deinit();
 
     const arena = arena_impl.allocator();
-
-    const home_dir_path = env.get("HOME") orelse return;
-
-    var home_dir = try Io.Dir.cwd().openDir(io, home_dir_path, .{});
-    defer home_dir.close(io);
-
-    try home_dir.createDirPath(io, ".local/share/packa");
 
     var fetch_group: Io.Group = .init;
     defer fetch_group.cancel(io);
@@ -46,7 +38,7 @@ pub fn install(
         try packages[i].lua.new(0);
         initialized_packages += 1;
 
-        try packages[i].tryFetch(io, gpa, home_dir);
+        try packages[i].tryFetch(io, gpa);
     }
 
     try fetch_group.await(io);
@@ -86,13 +78,13 @@ const Package = struct {
     }
 
     /// Fetch a binary package and save it in cache if it is signed
-    fn tryFetch(self: *Package, io: Io, gpa: Allocator, home_dir: Io.Dir) !void {
+    fn tryFetch(self: *Package, io: Io, gpa: Allocator) !void {
         const lua = self.lua;
 
-        const packa_dir = try home_dir.openDir(io, ".local/share/packa", .{});
+        const packa_dir = try Io.Dir.cwd().openDir(io, "/opt/packa", .{});
         defer packa_dir.close(io);
 
-        const manifest = try util.getLuaScript(io, gpa, packa_dir, self.name);
+        const manifest = try util.getManifest(io, gpa, packa_dir, self.name);
         defer gpa.free(manifest);
 
         lua_helpers.setupState(&lua);
