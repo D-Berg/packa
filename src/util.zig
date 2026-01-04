@@ -206,32 +206,60 @@ pub fn unpackSource(
     };
     defer gpa.free(bytes);
 
-    switch (compression) {
-        .gz => {
-            var in: Io.Reader = .fixed(bytes);
-            var decompress_buf: [std.compress.flate.max_window_len]u8 = undefined;
-            var decompressor: std.compress.flate.Decompress = .init(&in, .gzip, &decompress_buf);
-
-            var diagnostics: std.tar.Diagnostics = .{ .allocator = gpa };
-            defer diagnostics.deinit();
-
-            try std.tar.pipeToFileSystem(io, out_dir, &decompressor.reader, .{
-                .diagnostics = &diagnostics,
-            });
-            if (diagnostics.errors.items.len > 0) {
-                // log.warn("{f}", .{diagnostics}); // TODO: if https://codeberg.org/ziglang/zig/pulls/30666 gets merged
-            }
-
-            log.info("Extracted {d} entries", .{diagnostics.entries});
-            return try gpa.dupe(u8, diagnostics.root_dir);
-        },
-        else => |kind| std.debug.panic("DECOMPRESSION NOT YET IMPLEMENTED FOR '{t}'", .{kind}),
-    }
+    var in: Io.Reader = .fixed(bytes);
+    return extractArchive(io, gpa, &in, out_dir, compression);
 }
 
 const Compression = enum {
     none,
     xz,
     gz,
-    zstd,
+    zst,
 };
+
+pub fn extractArchive(
+    io: Io,
+    gpa: Allocator,
+    in: *Io.Reader,
+    out_dir: Io.Dir,
+    compression: Compression,
+) ![]const u8 {
+    switch (compression) {
+        .none => return try tarToDir(io, gpa, in, out_dir),
+        .gz => {
+            var decompress_buf: [std.compress.flate.max_window_len]u8 = undefined;
+            var decompressor: std.compress.flate.Decompress = .init(in, .gzip, &decompress_buf);
+            return try tarToDir(io, gpa, &decompressor.reader, out_dir);
+        },
+        .xz => {
+            var decompressor: std.compress.xz.Decompress = try .init(in, gpa, &.{});
+            defer decompressor.deinit();
+
+            return try tarToDir(io, gpa, &decompressor.reader, out_dir);
+        },
+        .zst => {
+            const window_len = std.compress.zstd.default_window_len;
+            const window_buffer = try gpa.alloc(u8, window_len + std.compress.zstd.block_size_max);
+            defer gpa.free(window_buffer);
+
+            var decompressor: std.compress.zstd.Decompress = .init(in, window_buffer, .{
+                .window_len = window_len,
+            });
+            return try tarToDir(io, gpa, &decompressor.reader, out_dir);
+        },
+    }
+}
+
+fn tarToDir(io: Io, gpa: Allocator, in: *Io.Reader, out_dir: Io.Dir) ![]const u8 {
+    var diagnostics: std.tar.Diagnostics = .{ .allocator = gpa };
+    defer diagnostics.deinit();
+
+    try std.tar.pipeToFileSystem(io, out_dir, in, .{
+        .diagnostics = &diagnostics,
+    });
+    if (diagnostics.errors.items.len > 0) {
+        // log.warn("{f}", .{diagnostics}); // TODO: if https://codeberg.org/ziglang/zig/pulls/30666 gets merged
+    }
+
+    return try gpa.dupe(u8, diagnostics.root_dir);
+}
