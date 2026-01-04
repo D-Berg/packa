@@ -21,8 +21,8 @@ pub fn install(
 
     const arena = arena_impl.allocator();
 
-    var fetch_group: Io.Group = .init;
-    defer fetch_group.cancel(io);
+    // var fetch_group: Io.Group = .init;
+    // defer fetch_group.cancel(io);
 
     var initialized_packages: usize = 0;
     var packages = try arena.alloc(Package, args.package_names.len);
@@ -41,8 +41,8 @@ pub fn install(
         try packages[i].tryFetch(io, gpa);
     }
 
-    try fetch_group.await(io);
-    std.debug.print("finished installing\n", .{});
+    // try fetch_group.await(io);
+    log.info("finished installing\n", .{});
 
     // for (args.package_names) |name| {
     //     try installPackage(io, gpa, progress, dir, name, args.approved);
@@ -131,14 +131,13 @@ const Package = struct {
         });
         defer gpa.free(minisig_url);
 
-        // TODO: AASYYYNC
-        const archive = try util.fetch(io, gpa, binary_url);
-        defer gpa.free(archive);
+        var archive_fut = io.async(util.fetch, .{ io, gpa, binary_url });
+        defer if (archive_fut.cancel(io)) |archive| gpa.free(archive) else |_| {};
 
-        const minisig = try util.fetch(io, gpa, minisig_url);
-        defer gpa.free(minisig);
+        var minisig_fut = io.async(util.fetch, .{ io, gpa, minisig_url });
+        defer if (minisig_fut.cancel(io)) |minisig| gpa.free(minisig) else |_| {};
 
-        if (!try util.checkSignature(gpa, archive, minisig)) {
+        if (!try util.checkSignature(gpa, try archive_fut.await(io), try minisig_fut.await(io))) {
             return error.InvalidSignature;
         }
 
