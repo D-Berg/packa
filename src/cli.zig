@@ -13,13 +13,14 @@ pub const Command = union(enum) {
     build: BuildArgs,
     version: []const u8,
     setup,
+    info: []const u8,
 
     pub fn deinit(self: *Command, gpa: Allocator) void {
         switch (self.*) {
             .install => |install| {
                 gpa.free(install.package_names);
             },
-            .help, .build, .version, .setup => {},
+            .help, .build, .version, .setup, .info => {},
         }
     }
 };
@@ -68,6 +69,8 @@ pub fn parse(gpa: Allocator, args: []const []const u8, diag: ?*Diagnostic) !Comm
         return .{ .version = build_options.version };
     } else if (eql(arg, "setup")) {
         return .setup;
+    } else if (eql(arg, "info")) {
+        return try parseInfoArgs(&arg_it);
     }
 
     return error.UnknownCommand;
@@ -124,6 +127,11 @@ fn parseBuildArgs(args: *ArgIterator) !Command {
     }
 
     return .{ .build = build_args };
+}
+
+fn parseInfoArgs(args: *ArgIterator) !Command {
+    const package_name = args.next() orelse return error.InfoMissingPackageName;
+    return .{ .info = package_name };
 }
 
 pub const usage =

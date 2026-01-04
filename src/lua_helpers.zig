@@ -26,3 +26,5 @@ pub fn setupState(lua: *const zlua.State) void {
         lua.setGlobal("Package");
     }
 }
+
+// TODO make helper fn to lua.pkg -> zig.Package

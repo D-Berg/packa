@@ -68,7 +68,9 @@ pub fn main() !void {
             fastExit(1);
             return err;
         },
-        // TODO: info
+        .info => |package_name| {
+            try actions.info(io, gpa, package_name);
+        },
     }
 }
 
