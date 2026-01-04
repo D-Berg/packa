@@ -3,18 +3,23 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const build_options = @import("build_options");
 
+fn eql(a: []const u8, b: []const u8) bool {
+    return std.mem.eql(u8, a, b);
+}
+
 pub const Command = union(enum) {
     install: InstallArgs,
     help: []const u8,
     build: BuildArgs,
     version: []const u8,
+    setup,
 
     pub fn deinit(self: *Command, gpa: Allocator) void {
         switch (self.*) {
             .install => |install| {
                 gpa.free(install.package_names);
             },
-            .help, .build, .version => {},
+            .help, .build, .version, .setup => {},
         }
     }
 };
@@ -55,12 +60,14 @@ pub fn parse(gpa: Allocator, args: []const []const u8, diag: ?*Diagnostic) !Comm
     assert(arg_it.skip());
 
     const arg = arg_it.next() orelse return .{ .help = usage };
-    if (std.mem.eql(u8, arg, "install")) {
+    if (eql(arg, "install")) {
         return try parseInstallArgs(&arg_it, gpa);
-    } else if (std.mem.eql(u8, arg, "build")) {
+    } else if (eql(arg, "build")) {
         return try parseBuildArgs(&arg_it);
-    } else if (std.mem.eql(u8, arg, "version")) {
+    } else if (eql(arg, "version")) {
         return .{ .version = build_options.version };
+    } else if (eql(arg, "setup")) {
+        return .setup;
     }
 
     return error.UnknownCommand;
@@ -80,11 +87,11 @@ fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
 
     while (args.next()) |arg| {
         if (std.mem.startsWith(u8, arg, "-")) {
-            if (std.mem.eql(u8, arg, "-h")) {
+            if (eql(arg, "-h")) {
                 return .{ .help = "packa install <formula1> <formula2> ..." };
-            } else if (std.mem.eql(u8, arg, "-y") or std.mem.eql(u8, arg, "--yes")) {
+            } else if (eql(arg, "-y") or std.mem.eql(u8, arg, "--yes")) {
                 approved = true;
-            } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--source")) {
+            } else if (eql(arg, "-s") or std.mem.eql(u8, arg, "--source")) {
                 build_from_source = true;
             } else {
                 return error.UnknowInstallFlag;
@@ -117,3 +124,5 @@ pub const usage =
     \\Usage of packa
     \\
 ;
+
+// TODO: test cli parsing

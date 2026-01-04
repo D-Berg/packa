@@ -6,15 +6,9 @@ const cli = @import("cli.zig");
 const minizign = @import("minizign");
 
 const Io = std.Io;
-
-const fast_exit = switch (builtin.mode) {
-    .Debug, .ReleaseSafe => false,
-    .ReleaseFast, .ReleaseSmall => true,
-};
-
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 const log = std.log;
 
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 pub fn main() !void {
     const gpa, const is_debug = gpa: {
         break :gpa switch (builtin.mode) {
@@ -53,11 +47,16 @@ pub fn main() !void {
     const command = try cli.parse(arena, args, null);
     switch (command) {
         .install => |install_args| {
-            try actions.install(io, gpa, progress, &env, install_args);
+            checkSetup(io);
+            actions.install(io, gpa, progress, &env, install_args) catch |err| {
+                fastExit(1);
+                return err;
+            };
         },
         .build => |build_args| {
+            checkSetup(io);
             actions.build(io, gpa, &env, build_args) catch |err| {
-                if (fast_exit) std.process.exit(1);
+                fastExit(1);
                 return err;
             };
         },
@@ -65,6 +64,34 @@ pub fn main() !void {
             try stdout.print("{s}\n", .{str});
             try stdout.flush();
         },
+        .setup => actions.setup(io, arena, progress) catch |err| {
+            fastExit(1);
+            return err;
+        },
         // TODO: info
+    }
+}
+
+/// Fast check and exit if packa is not setup
+fn checkSetup(io: Io) void {
+    Io.Dir.cwd().access(io, "/opt/packa", .{
+        .read = true,
+        .write = true,
+        .follow_symlinks = false,
+    }) catch |err| {
+        // TODO: switch on error for better reporting
+        switch (err) {
+            else => {},
+        }
+        std.log.err("packa need access to '/opt/packa', try running 'packa setup'", .{});
+        std.process.exit(1);
+    };
+}
+
+/// To not print error stack trace and just fast exit depending on build mode
+fn fastExit(status: u8) void {
+    switch (builtin.mode) {
+        .Debug, .ReleaseSafe => {},
+        .ReleaseFast, .ReleaseSmall => std.process.exit(status),
     }
 }
