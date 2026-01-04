@@ -15,7 +15,7 @@ const BuildArgs = cli.BuildArgs;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) !void {
+pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildArgs) !void {
     var timer: std.time.Timer = try .start();
 
     // use for temporary strings
@@ -177,7 +177,7 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
         _ = lua.pushlString("null userdata");
         return 2;
     };
-    const env_map: *std.process.EnvMap = @ptrCast(@alignCast(ud));
+    const env_map: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
 
     const key = lua.toLString(1);
     const value = lua.toLString(2);
@@ -207,7 +207,7 @@ fn luaEnvGet(state: ?*zlua.LuaState) callconv(.c) c_int {
         _ = lua.pushlString("null userdata");
         return 2;
     };
-    const env_map: *std.process.EnvMap = @ptrCast(@alignCast(ud));
+    const env_map: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
 
     const key = lua.toLString(1);
     if (env_map.get(key)) |val| {
@@ -232,19 +232,15 @@ fn luaEnvAppend(state: ?*zlua.LuaState) callconv(.c) c_int {
         _ = lua.pushlString("null userdata");
         return 2;
     };
-    const env: *std.process.EnvMap = @ptrCast(@alignCast(ud));
+    const env: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
 
     const key = lua.toLString(1);
     const val = lua.toLString(2);
 
     // TODO: to panic or not to panic?
     if (env.getPtr(key)) |old_val| {
-        const new_val = std.fmt.allocPrint(
-            env.hash_map.allocator,
-            "{s} {s}",
-            .{ old_val.*, val },
-        ) catch @panic("OOM");
-        env.hash_map.allocator.free(old_val.*);
+        const new_val = std.fmt.allocPrint(env.allocator, "{s} {s}", .{ old_val.*, val }) catch @panic("OOM");
+        env.allocator.free(old_val.*);
         old_val.* = new_val;
     } else {
         env.put(key, val) catch @panic("OOM");
@@ -254,11 +250,9 @@ fn luaEnvAppend(state: ?*zlua.LuaState) callconv(.c) c_int {
     return 1;
 }
 
-/// `luaRun(io: Io, gpa: Allocator, cwd_dir: Io.Dir, env: *std.process.EnvMap, args: []const u8)`
+/// `luaRun(io: Io, gpa: Allocator, cwd_dir: Io.Dir, env: *std.process.Environ.Map, args: []const u8)`
 fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
-
-    var print_buf: [128]u8 = undefined;
 
     const n_args: usize = @intCast(lua.getTop());
     if (n_args < 1) {
@@ -300,23 +294,19 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         _ = lua.pushlString("env userdata was null");
         return 2;
     };
-    const env: *const std.process.EnvMap = @ptrCast(@alignCast(env_ud));
+    const env: *const std.process.Environ.Map = @ptrCast(@alignCast(env_ud));
 
-    const argv = gpa.alloc([]const u8, n_args) catch |err| {
-        std.debug.panic("{t}", .{err});
-    };
-    defer gpa.free(argv);
-
+    const argv = arena.alloc([]const u8, n_args) catch @panic("OOM");
     for (0..argv.len) |i| {
         const lua_idx: isize = @intCast(i + 1);
         switch (lua.typeOf(lua_idx)) {
             .string => argv[i] = lua.toLString(lua_idx),
             inline else => |t| {
-                const err_msg = std.fmt.bufPrint(
-                    &print_buf,
+                const err_msg = std.fmt.allocPrint(
+                    arena,
                     "Expected arg[{d}] be of type string, got {t}",
                     .{ i + 1, t },
-                ) catch "Unexpected type";
+                ) catch @panic("OOM");
 
                 lua.pushNil();
                 _ = lua.pushlString(err_msg);
@@ -328,24 +318,43 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     const command = std.mem.join(arena, " ", argv) catch @panic("OOM");
     log.info("{s}", .{command});
-    var child = std.process.Child.init(argv, gpa);
-    child.cwd_dir = cwd_dir;
-    child.env_map = env;
-    child.spawn(io) catch {
+    var child = std.process.spawn(io, .{
+        .argv = argv,
+        .environ_map = env,
+        .cwd_dir = cwd_dir,
+    }) catch {
         lua.pushNil();
         _ = lua.pushlString("SpawnError");
         return 2;
     };
 
     const term = child.wait(io) catch |err| {
-        const err_msg = bufPrint(&print_buf, "{t}", .{err}) catch "WaitError";
+        const err_msg = std.fmt.allocPrint(arena, "{s}: {t}", .{ command, err }) catch @panic("OOM");
         lua.pushNil();
         _ = lua.pushlString(err_msg);
         return 2;
     };
+    switch (term) {
+        .exited => |code| {
+            if (code == 0) {
+                lua.pushBoolean(true);
+                return 1;
+            }
+            const err_msg = std.fmt.allocPrint(arena, "{s} exited({d})", .{
+                command, code,
+            }) catch @panic("OOM");
+            lua.pushNil();
+            _ = lua.pushlString(err_msg);
+            return 2;
+        },
+        inline else => |code| {
+            const err_msg = std.fmt.allocPrint(arena, "{s} terminated: {t}({d})", .{
+                command, term, code,
+            }) catch @panic("OOM");
 
-    log.debug("child exited with term: {t}({d})\n", .{ term, term.Exited });
-
-    lua.pushBoolean(true);
-    return 1;
+            lua.pushNil();
+            _ = lua.pushlString(err_msg);
+            return 2;
+        },
+    }
 }

@@ -9,7 +9,7 @@ const Io = std.Io;
 const log = std.log;
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     const gpa, const is_debug = gpa: {
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
@@ -20,7 +20,7 @@ pub fn main() !void {
         _ = debug_allocator.deinit();
     };
 
-    var threaded_io: Io.Threaded = .init(gpa, .{});
+    var threaded_io: Io.Threaded = .init(gpa, .{ .environ = init.environ });
     defer threaded_io.deinit();
 
     const io = threaded_io.io();
@@ -33,17 +33,16 @@ pub fn main() !void {
 
     const arena = arena_impl.allocator();
 
-    var env = std.process.getEnvMap(arena) catch |err| {
+    var env = init.environ.createMap(arena) catch |err| { // TODO: arena?
         log.err("Could not get env map: {t}", .{err});
         return err;
     };
-
-    const args = try std.process.argsAlloc(arena);
 
     var stdout_buf: [64]u8 = undefined;
     var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
     const stdout: *std.Io.Writer = &stdout_w.interface;
 
+    const args = try init.args.toSlice(arena);
     const command = try cli.parse(arena, args, null);
     switch (command) {
         .install => |install_args| {

@@ -65,13 +65,13 @@ fn run(
     const run_progress = progress.start(argv_str, 1);
     defer run_progress.end();
 
-    const run_result = try std.process.Child.run(arena, io, .{
+    const run_result = try std.process.run(arena, io, .{
         .argv = argv,
         .progress_node = run_progress,
         .cwd_dir = cwd_dir,
     });
     switch (run_result.term) {
-        .Exited => |code| if (code != 0) {
+        .exited => |code| if (code != 0) {
             log.err("{s} failed with exit code {d}", .{ argv_str, code });
             log.err("{s}", .{run_result.stderr});
             return error.BadExit;

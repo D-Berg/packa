@@ -78,7 +78,7 @@ fn getVersion(b: *std.Build) ![]const u8 {
         "--git-dir", ".git", // affected by the -C argument
         "describe", "--match",    "*.*.*", //
         "--tags",   "--abbrev=8",
-    }, &code, .Ignore) catch {
+    }, &code, .ignore) catch {
         return version;
     };
 
