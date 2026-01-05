@@ -137,6 +137,14 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
         lua.pushCClosure(luaEnvSet, 1);
         lua.setField(env_table, "set");
 
+        lua.pushLightUserdata(@ptrCast(@alignCast(env)));
+        lua.pushCClosure(luaEnvGet, 1);
+        lua.setField(env_table, "get");
+
+        lua.pushLightUserdata(@ptrCast(@alignCast(env)));
+        lua.pushCClosure(luaEnvAppend, 1);
+        lua.setField(env_table, "append");
+
         lua.setField(b, "env");
     }
 
@@ -180,6 +188,66 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
     };
 
     log.debug("env {s} = {s}", .{ key, value });
+
+    lua.pushBoolean(true);
+    return 1;
+}
+
+fn luaEnvGet(state: ?*zlua.LuaState) callconv(.c) c_int {
+    const lua: zlua.State = .{ .inner = state.? };
+    if (lua.getTop() != 1) {
+        lua.pushNil();
+        _ = lua.pushlString("Package.get requires a key");
+        return 2;
+    }
+
+    const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
+        lua.pushBoolean(false);
+        _ = lua.pushlString("null userdata");
+        return 2;
+    };
+    const env_map: *std.process.EnvMap = @ptrCast(@alignCast(ud));
+
+    const key = lua.toLString(1);
+    if (env_map.get(key)) |val| {
+        _ = lua.pushlString(val);
+        return 1;
+    }
+
+    lua.pushNil();
+    return 1;
+}
+
+fn luaEnvAppend(state: ?*zlua.LuaState) callconv(.c) c_int {
+    const lua: zlua.State = .{ .inner = state.? };
+    if (lua.getTop() != 2) {
+        lua.pushNil();
+        _ = lua.pushlString("Package.get requires a key and value");
+        return 2;
+    }
+
+    const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
+        lua.pushBoolean(false);
+        _ = lua.pushlString("null userdata");
+        return 2;
+    };
+    const env: *std.process.EnvMap = @ptrCast(@alignCast(ud));
+
+    const key = lua.toLString(1);
+    const val = lua.toLString(2);
+
+    // TODO: to panic or not to panic?
+    if (env.getPtr(key)) |old_val| {
+        const new_val = std.fmt.allocPrint(
+            env.hash_map.allocator,
+            "{s} {s}",
+            .{ old_val.*, val },
+        ) catch @panic("OOM");
+        env.hash_map.allocator.free(old_val.*);
+        old_val.* = new_val;
+    } else {
+        env.put(key, val) catch @panic("OOM");
+    }
 
     lua.pushBoolean(true);
     return 1;
