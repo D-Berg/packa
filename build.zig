@@ -58,6 +58,16 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_test.step);
+
+    const fmt = b.addFmt(.{
+        .check = true,
+        .paths = &.{
+            "src",
+            "build.zig",
+            "build.zig.zon",
+        },
+    });
+    b.getInstallStep().dependOn(&fmt.step);
 }
 
 fn getVersion(b: *std.Build) ![]const u8 {
