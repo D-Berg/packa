@@ -68,8 +68,9 @@ pub fn main() !void {
             fastExit(1);
             return err;
         },
-        .info => |package_name| {
-            try actions.info(io, gpa, package_name);
+        .info => |package_name| actions.info(io, gpa, package_name) catch |err| {
+            fastExit(1);
+            return err;
         },
     }
 }
