@@ -16,6 +16,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) !void {
+    var timer: std.time.Timer = try .start();
 
     // use for temporary strings
     var print_buf: [4096]u8 = undefined;
@@ -157,8 +158,8 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.EnvMap, args: BuildArgs) 
     };
 
     log.info(
-        "Successfully built {s}-{s} located at {s}",
-        .{ pkg_name, pkg_version, prefix_path },
+        "Successfully built {s}-{s} located at {s}, built in {D}",
+        .{ pkg_name, pkg_version, prefix_path, timer.lap() },
     );
 }
 
