@@ -214,6 +214,10 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const gpa_ptr: *const Allocator = @ptrCast(@alignCast(gpa_ud));
     const gpa = gpa_ptr.*;
 
+    var scratch_arena: std.heap.ArenaAllocator = .init(gpa);
+    defer scratch_arena.deinit();
+    const arena = scratch_arena.allocator();
+
     const cwd_dir_ud = lua.toUserdata(lua.upvalueIndex(3)) orelse {
         lua.pushNil();
         _ = lua.pushlString("cwd_dir userdata was null");
@@ -253,7 +257,8 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         }
     }
 
-    log.debug("runing {s}", .{argv[0]});
+    const command = std.mem.join(arena, " ", argv) catch @panic("OOM");
+    log.info("{s}", .{command});
     var child = std.process.Child.init(argv, gpa);
     child.cwd_dir = cwd_dir;
     child.env_map = env;
