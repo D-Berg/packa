@@ -126,7 +126,8 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildA
         lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&gpa))));
         lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&tar_root_dir))));
         lua.pushLightUserdata(@ptrCast(@alignCast(env)));
-        lua.pushCClosure(luaRun, 4);
+        lua.pushBoolean(args.verbose);
+        lua.pushCClosure(luaRun, 5);
         lua.setField(b, "run");
     }
 
@@ -296,6 +297,8 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     };
     const env: *const std.process.Environ.Map = @ptrCast(@alignCast(env_ud));
 
+    const verbose = lua.toBoolean(lua.upvalueIndex(5));
+
     const argv = arena.alloc([]const u8, n_args) catch @panic("OOM");
     for (0..argv.len) |i| {
         const lua_idx: isize = @intCast(i + 1);
@@ -322,14 +325,30 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         .argv = argv,
         .environ_map = env,
         .cwd_dir = cwd_dir,
+        .stdout = if (verbose) .inherit else .pipe,
+        .stderr = if (verbose) .inherit else .pipe,
     }) catch {
         lua.pushNil();
         _ = lua.pushlString("SpawnError");
         return 2;
     };
+    defer child.kill(io);
+
+    var stdout: std.ArrayList(u8) = .empty;
+    var stderr: std.ArrayList(u8) = .empty;
+    if (!verbose) child.collectOutput(arena, &stdout, &stderr, 50 * 1024) catch |err| {
+        const err_msg = std.fmt.allocPrint(
+            arena,
+            "Failed to collect output for {s}: {t}",
+            .{ command, err },
+        ) catch @panic("oom");
+        lua.pushNil();
+        _ = lua.pushlString(err_msg);
+        return 2;
+    };
 
     const term = child.wait(io) catch |err| {
-        const err_msg = std.fmt.allocPrint(arena, "{s}: {t}", .{ command, err }) catch @panic("OOM");
+        const err_msg = std.fmt.allocPrint(arena, "{s}: {t}", .{ command, err }) catch @panic("oom");
         lua.pushNil();
         _ = lua.pushlString(err_msg);
         return 2;
@@ -340,16 +359,22 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
                 lua.pushBoolean(true);
                 return 1;
             }
-            const err_msg = std.fmt.allocPrint(arena, "{s} exited({d})", .{
+            const err_msg = if (verbose) std.fmt.allocPrint(arena, "{s} exited({d})", .{
                 command, code,
-            }) catch @panic("OOM");
+            }) catch @panic("OOM") else std.fmt.allocPrint(
+                arena,
+                "{s} exited({d})\n{s}",
+                .{ command, code, stderr.items },
+            ) catch @panic("OOM");
             lua.pushNil();
             _ = lua.pushlString(err_msg);
             return 2;
         },
         inline else => |code| {
-            const err_msg = std.fmt.allocPrint(arena, "{s} terminated: {t}({d})", .{
+            const err_msg = if (verbose) std.fmt.allocPrint(arena, "{s} terminated: {t}({d})", .{
                 command, term, code,
+            }) catch @panic("OOM") else std.fmt.allocPrint(arena, "{s} terminated: {t}({d})\n{s}", .{
+                command, term, code, stderr.items,
             }) catch @panic("OOM");
 
             lua.pushNil();

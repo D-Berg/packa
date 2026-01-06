@@ -112,6 +112,7 @@ fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
 pub const BuildArgs = struct {
     package_name: []const u8,
     prefix_path: []const u8,
+    verbose: bool = false,
 };
 fn parseBuildArgs(args: *ArgIterator) !Command {
     var build_args: BuildArgs = .{
@@ -120,10 +121,13 @@ fn parseBuildArgs(args: *ArgIterator) !Command {
     };
     build_args.package_name = args.next() orelse return error.BuildMissingPackageName;
 
-    var next = args.next() orelse return .{ .build = build_args };
-    if (eql(next, "-p") or eql(next, "--prefix")) {
-        next = args.next() orelse return error.BuildMissingPrefixPath;
-        build_args.prefix_path = next;
+    while (args.next()) |arg| {
+        if (eql(arg, "-p") or eql(arg, "--prefix")) {
+            const next = args.next() orelse return error.BuildMissingPrefixPath;
+            build_args.prefix_path = next;
+        } else if (eql(arg, "-v") or eql(arg, "--verbose")) {
+            build_args.verbose = true;
+        }
     }
 
     return .{ .build = build_args };
