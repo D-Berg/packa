@@ -7,20 +7,6 @@ const assert = std.debug.assert;
 
 const minizign = @import("minizign");
 
-pub fn makeOrOpenAbsoluteDir(path: []const u8) !std.fs.Dir {
-    if (std.fs.openDirAbsolute(path, .{})) |dir| {
-        return dir;
-    } else |err| {
-        switch (err) {
-            error.FileNotFound => {
-                try std.fs.makeDirAbsolute(path);
-                return try std.fs.openDirAbsolute(path, .{});
-            },
-            else => return err,
-        }
-    }
-}
-
 /// Prompt user with a yes or no prompt, returning either true or false
 pub fn confirm(io: Io, prompt: []const u8, retries: usize) !bool {
     var stdout_buf: [64]u8 = undefined;
