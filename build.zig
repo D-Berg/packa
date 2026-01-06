@@ -14,6 +14,7 @@ pub fn build(b: *std.Build) void {
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", version);
+    build_options.addOption([]const u8, "pub_key", "RWRBqjaanO0YoCQ8mTc6c6iBUJqFFWMraIQl9wOb1NzAeAxp6Hy56kkV");
 
     const zlua_dep = b.dependency("zlua", .{
         .target = target,

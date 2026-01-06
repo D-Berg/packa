@@ -1,11 +1,11 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const log = std.log.scoped(.util);
 const assert = std.debug.assert;
 
 const minizign = @import("minizign");
-const pub_key = @embedFile("minisign.pub");
 
 pub fn makeOrOpenAbsoluteDir(path: []const u8) !std.fs.Dir {
     if (std.fs.openDirAbsolute(path, .{})) |dir| {
@@ -110,7 +110,7 @@ pub fn getManifest(io: Io, gpa: Allocator, packa_dir: Io.Dir, name: []const u8) 
 /// Verify minisign Signature
 pub fn checkSignature(gpa: Allocator, bytes: []const u8, minisig: []const u8) !bool {
     var pks_buf: [64]minizign.PublicKey = undefined;
-    const pks = try minizign.PublicKey.decode(&pks_buf, pub_key);
+    const pks = try minizign.PublicKey.decode(&pks_buf, build_options.pub_key);
 
     var sig = try minizign.Signature.decode(gpa, minisig);
     defer sig.deinit();
