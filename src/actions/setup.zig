@@ -13,7 +13,7 @@ pub fn setup(io: Io, arena: Allocator, progress: std.Progress.Node) !void {
     const uid = std.posix.getuid();
     const gid = std.posix.getgid();
 
-    if (uid != 0) {
+    if (uid != 0) { // FIX: bad way of checking privelage
         log.info("Need root privelages", .{});
         try run(io, arena, &.{ "sudo", "-v" }, .none, null);
     }
@@ -26,6 +26,8 @@ pub fn setup(io: Io, arena: Allocator, progress: std.Progress.Node) !void {
     var id_str_buf: [32]u8 = undefined;
     const id_str = try std.fmt.bufPrint(&id_str_buf, "{d}:{d}", .{ uid, gid });
     try run(io, arena, &.{ "sudo", "chown", id_str, "/opt/packa" }, setup_progress, null);
+
+    // TODO: inform what setup will do and let user confirm
 
     const packa_dir = try Io.Dir.cwd().openDir(io, "/opt/packa", .{
         .follow_symlinks = false,
@@ -77,10 +79,9 @@ fn run(
             return error.BadExit;
         },
         inline else => |code| {
-            log.err(
-                "Failed to create dir '/opt/packa' due to {t}({d})\n {s}",
-                .{ run_result.term, code, run_result.stderr },
-            );
+            log.err("Failed to create dir '/opt/packa' due to {t}({d})\n {s}", .{
+                run_result.term, code, run_result.stderr,
+            });
             return error.RunFailed;
         },
     }

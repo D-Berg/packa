@@ -108,14 +108,18 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildA
     const prefix_path = blk: { // push prefix to lua state
         if (Io.Dir.path.isAbsolute(args.prefix_path)) {
             if (std.mem.eql(u8, args.prefix_path, "/opt/packa/tmp")) {
-                const prefix_path = try bufPrint(&print_buf, "{s}/{s}-{s}", .{ args.prefix_path, pkg_name, pkg_version });
+                const prefix_path = try bufPrint(&print_buf, "{s}/{s}-{s}", .{
+                    args.prefix_path, pkg_name, pkg_version,
+                });
                 break :blk lua.pushlString(prefix_path);
             }
             break :blk lua.pushlString(args.prefix_path);
         } else {
             var cwd_buf: [Io.Dir.max_path_bytes]u8 = undefined;
             const cwd_path = try std.process.getCwd(&cwd_buf);
-            const prefix_path = try bufPrint(&print_buf, "{s}/{s}", .{ cwd_path, args.prefix_path });
+            const prefix_path = try bufPrint(&print_buf, "{s}/{s}", .{
+                cwd_path, args.prefix_path,
+            });
             break :blk lua.pushlString(prefix_path);
         }
     };
