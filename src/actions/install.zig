@@ -121,7 +121,7 @@ const Package = struct {
         defer fetch_progrss.end();
 
         const base_url = "http://localhost:8000";
-        const binary_url = try std.fmt.allocPrint(gpa, "{s}/{s}/{s}/{s}-{s}-{t}-{t}.zst.gz", .{
+        const binary_url = try std.fmt.allocPrint(gpa, "{s}/{s}/{s}/{s}-{s}-{t}-{t}.tar.zst", .{
             base_url, name, version, name, version, builtin.target.cpu.arch, builtin.os.tag,
         });
         defer gpa.free(binary_url);
