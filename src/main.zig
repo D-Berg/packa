@@ -28,7 +28,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     const progress = std.Progress.start(io, .{});
     defer progress.end();
 
-    var arena_impl: std.heap.ArenaAllocator = .init(gpa);
+    var arena_impl: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
     defer arena_impl.deinit();
 
     const arena = arena_impl.allocator();
