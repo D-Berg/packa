@@ -329,7 +329,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         .argv = argv,
         .environ_map = env,
         .cwd_dir = cwd_dir,
-        .stdout = if (verbose) .inherit else .pipe,
+        .stdout = if (verbose) .inherit else .ignore,
         .stderr = if (verbose) .inherit else .pipe,
     }) catch {
         lua.pushNil();
@@ -338,18 +338,38 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     };
     defer child.kill(io);
 
-    var stdout: std.ArrayList(u8) = .empty;
     var stderr: std.ArrayList(u8) = .empty;
-    if (!verbose) child.collectOutput(arena, &stdout, &stderr, 50 * 1024) catch |err| {
-        const err_msg = std.fmt.allocPrint(
-            arena,
-            "Failed to collect output for {s}: {t}",
-            .{ command, err },
-        ) catch @panic("oom");
-        lua.pushNil();
-        _ = lua.pushlString(err_msg);
-        return 2;
-    };
+    if (!verbose) {
+        const KiB = 1024;
+        const MiB = 1024 * KiB;
+        const max_output_bytes = 2 * MiB;
+
+        var poller = std.Io.poll(arena, enum { stderr }, .{
+            .stderr = child.stderr.?,
+        });
+        defer poller.deinit();
+
+        const stderr_r = poller.reader(.stderr);
+        stderr_r.buffer = stderr.allocatedSlice();
+        stderr_r.seek = 0;
+        stderr_r.end = stderr.items.len;
+        defer {
+            stderr = .{
+                .items = stderr_r.buffer[0..stderr_r.end],
+                .capacity = stderr_r.buffer.len,
+            };
+            stderr_r.buffer = &.{};
+        }
+        while (true) {
+            const continue_poll = poller.poll() catch |err| {
+                const err_msg = std.fmt.allocPrint(arena, "{s}: {t}", .{ command, err }) catch @panic("oom");
+                lua.pushNil();
+                _ = lua.pushlString(err_msg);
+                return 2;
+            };
+            if (!continue_poll or stderr_r.bufferedLen() > max_output_bytes) break;
+        }
+    }
 
     const term = child.wait(io) catch |err| {
         const err_msg = std.fmt.allocPrint(arena, "{s}: {t}", .{ command, err }) catch @panic("oom");
