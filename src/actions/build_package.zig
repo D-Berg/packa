@@ -30,7 +30,13 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildA
     const tmp_dir = try packa_dir.openDir(io, "tmp", .{});
     defer tmp_dir.close(io);
 
-    const manifest = try util.getManifest(io, gpa, packa_dir, args.package_name);
+    assert(args.package_name.len > 0);
+    const manifest_path = try std.fmt.bufPrint(&print_buf, "repos/core/manifests/{c}/{s}.lua", .{
+        args.package_name[0],
+        args.package_name,
+    });
+    const man_stat = try packa_dir.statFile(io, manifest_path, .{});
+    const manifest = try packa_dir.readFileAllocOptions(io, manifest_path, gpa, .limited64(man_stat.size + 1), .@"8", 0);
     defer gpa.free(manifest);
 
     log.debug("manifest: \n\n{s}\n\n", .{manifest});

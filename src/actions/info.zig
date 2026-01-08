@@ -1,18 +1,45 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const zlua = @import("zlua");
 const util = @import("../util.zig");
 const cli = @import("../cli.zig");
 const lua_helpers = @import("../lua_helpers.zig");
+const minizign = @import("minizign");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+
+const assert = std.debug.assert;
 const log = std.log.scoped(.info);
 
 pub fn info(io: Io, gpa: Allocator, package_name: []const u8) !void {
     const packa_dir = try Io.Dir.cwd().openDir(io, "/opt/packa", .{});
     defer packa_dir.close(io);
 
-    const manifest = try util.getManifest(io, gpa, packa_dir, package_name);
+    // TODO: read maintainer key from config
+    const maintainer_pub_key = try minizign.PublicKey.decodeFromBase64(build_options.pub_key);
+
+    const repo_pub_key = try packa_dir.readFileAllocOptions(io, "repos/core/minisign.pub", gpa, .limited(1024), .@"8", null);
+    defer gpa.free(repo_pub_key);
+
+    const repo_sign = try packa_dir.readFileAllocOptions(io, "repos/core/minisign.pub.minisig", gpa, .limited(1024), .@"8", null);
+    defer gpa.free(repo_sign);
+
+    var sig = try minizign.Signature.decode(gpa, repo_sign);
+    defer sig.deinit();
+
+    var verifier = try maintainer_pub_key.verifier(&sig);
+    verifier.update(repo_pub_key);
+    try verifier.verify(gpa);
+
+    assert(package_name.len > 0);
+    var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const manifest_path = try std.fmt.bufPrint(&path_buf, "repos/core/manifests/{c}/{s}.lua", .{
+        package_name[0],
+        package_name,
+    });
+    const man_stat = try packa_dir.statFile(io, manifest_path, .{});
+    const manifest = try packa_dir.readFileAllocOptions(io, manifest_path, gpa, .limited64(man_stat.size + 1), .@"8", 0);
     defer gpa.free(manifest);
 
     var lua: zlua.State = .{ .gpa = gpa };

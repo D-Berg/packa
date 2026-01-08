@@ -1,5 +1,4 @@
 const std = @import("std");
-const build_options = @import("build_options");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const log = std.log.scoped(.util);
@@ -69,43 +68,6 @@ pub fn saveSliceToFile(io: Io, dir: Io.Dir, file_name: []const u8, data: []const
 
     try file_writer.interface.writeAll(data);
     try file_writer.interface.flush();
-}
-
-/// Retreives Lua script `repos/<repo>/manifests/<name[0]/{name}.lua`
-pub fn getManifest(io: Io, gpa: Allocator, packa_dir: Io.Dir, name: []const u8) ![:0]const u8 {
-    // TODO: seach all repos and not just core
-    const script_path = try std.fmt.allocPrint(gpa, "repos/core/manifests/{s}/{s}.lua", .{
-        name[0..1], name,
-    });
-    defer gpa.free(script_path);
-
-    const script_file = try packa_dir.openFile(io, script_path, .{});
-    defer script_file.close(io);
-
-    var read_buffer: [1024]u8 = undefined;
-    var file_reader = script_file.reader(io, &read_buffer);
-
-    var alloc_writer = std.Io.Writer.Allocating.init(gpa);
-    errdefer alloc_writer.deinit();
-
-    _ = try file_reader.interface.streamRemaining(&alloc_writer.writer);
-
-    return try alloc_writer.toOwnedSliceSentinel(0);
-}
-
-/// Verify minisign Signature
-pub fn checkSignature(gpa: Allocator, bytes: []const u8, minisig: []const u8) !bool {
-    var pks_buf: [64]minizign.PublicKey = undefined;
-    const pks = try minizign.PublicKey.decode(&pks_buf, build_options.pub_key);
-
-    var sig = try minizign.Signature.decode(gpa, minisig);
-    defer sig.deinit();
-
-    var verifier = try pks[0].verifier(&sig);
-    verifier.update(bytes);
-    verifier.verify(gpa) catch return false;
-
-    return true;
 }
 
 pub fn calcHash(in: []const u8) [64]u8 {
