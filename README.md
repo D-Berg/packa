@@ -1,6 +1,6 @@
 # Packa (WIP)
 
-A simple package manager
+A simple package manager, see [packa-core](https://github.com/d-berg/packa-core) for manifests.
 
 ## Architechture
 
