@@ -21,6 +21,8 @@ pub fn install(
     progress: std.Progress.Node,
     args: cli.InstallArgs,
 ) !void {
+    try util.checkSetup(io);
+
     var arena_impl: std.heap.ArenaAllocator = .init(gpa);
     defer arena_impl.deinit();
 

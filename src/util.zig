@@ -6,6 +6,22 @@ const assert = std.debug.assert;
 
 const minizign = @import("minizign");
 
+/// Fast check and exit if packa is not setup
+pub fn checkSetup(io: Io) !void {
+    Io.Dir.cwd().access(io, "/opt/packa", .{
+        .read = true,
+        .write = true,
+        .follow_symlinks = false,
+    }) catch |err| {
+        // TODO: switch on error for better reporting
+        switch (err) {
+            else => {},
+        }
+        std.log.err("packa need access to '/opt/packa', try running 'packa setup'", .{});
+        return error.PackaIsNotSetup;
+    };
+}
+
 /// Prompt user with a yes or no prompt, returning either true or false
 pub fn confirm(io: Io, prompt: []const u8, retries: usize) !bool {
     var stdout_buf: [64]u8 = undefined;

@@ -17,6 +17,7 @@ const Io = std.Io;
 
 // TODO: add copy License fn for pkg.build
 pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildArgs) !void {
+    try util.checkSetup(io);
     var timer: std.time.Timer = try .start();
 
     // use for temporary strings

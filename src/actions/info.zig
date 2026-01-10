@@ -13,6 +13,8 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.info);
 
 pub fn info(io: Io, gpa: Allocator, package_name: []const u8) !void {
+    try util.checkSetup(io);
+
     const packa_dir = try Io.Dir.cwd().openDir(io, "/opt/packa", .{});
     defer packa_dir.close(io);
 

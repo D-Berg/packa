@@ -45,19 +45,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
     const args = try init.args.toSlice(arena);
     const command = try cli.parse(arena, args, null);
     switch (command) {
-        .install => |install_args| {
-            checkSetup(io);
-            actions.install(io, gpa, progress, install_args) catch |err| {
-                fastExit(1);
-                return err;
-            };
+        .install => |install_args| actions.install(io, gpa, progress, install_args) catch |err| {
+            fastExit(1);
+            return err;
         },
-        .build => |build_args| {
-            checkSetup(io);
-            actions.build(io, gpa, &env, build_args) catch |err| {
-                fastExit(1);
-                return err;
-            };
+        .build => |build_args| actions.build(io, gpa, &env, build_args) catch |err| {
+            fastExit(1);
+            return err;
         },
         .help, .version => |str| {
             try stdout.print("{s}\n", .{str});
@@ -72,22 +66,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             return err;
         },
     }
-}
-
-/// Fast check and exit if packa is not setup
-fn checkSetup(io: Io) void {
-    Io.Dir.cwd().access(io, "/opt/packa", .{
-        .read = true,
-        .write = true,
-        .follow_symlinks = false,
-    }) catch |err| {
-        // TODO: switch on error for better reporting
-        switch (err) {
-            else => {},
-        }
-        std.log.err("packa need access to '/opt/packa', try running 'packa setup'", .{});
-        std.process.exit(1);
-    };
+    fastExit(0);
 }
 
 /// To not print error stack trace and just fast exit depending on build mode
