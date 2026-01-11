@@ -86,13 +86,13 @@ pub fn saveSliceToFile(io: Io, dir: Io.Dir, file_name: []const u8, data: []const
     try file_writer.interface.flush();
 }
 
-pub fn calcHash(in: []const u8) [64]u8 {
-    var blake3 = std.crypto.hash.Blake3.init(.{});
-    blake3.update(in);
-
+pub fn calcHash(
+    io: Io,
+    gpa: Allocator,
+    in: []const u8,
+) ![64]u8 {
     var hash: [32]u8 = undefined;
-    blake3.final(&hash);
-
+    try std.crypto.hash.Blake3.hashParallel(in, &hash, .{}, gpa, io);
     var hash_buf: [2 * hash.len]u8 = undefined;
     _ = std.fmt.bufPrint(&hash_buf, "{x}", .{hash[0..]}) catch unreachable;
     return hash_buf;
@@ -136,7 +136,7 @@ pub fn unpackSource(
 
             _ = try tar_file_reader.interface.streamRemaining(&aw.writer);
 
-            const hash = calcHash(aw.written());
+            const hash = try calcHash(io, gpa, aw.written());
             if (std.mem.eql(u8, pkg_hash, hash[0..])) {
                 log.debug("hashes matches", .{});
             } else {
@@ -155,7 +155,7 @@ pub fn unpackSource(
             const bytes = try fetch(io, gpa, url);
             errdefer gpa.free(bytes);
 
-            const hash = calcHash(bytes);
+            const hash = try calcHash(io, gpa, bytes);
             if (!std.mem.eql(u8, pkg_hash, hash[0..])) {
                 log.err("hashes DONT match, expected {s}, got {s}", .{ pkg_hash, hash });
                 return error.MalformedHash;
