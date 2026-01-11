@@ -38,3 +38,9 @@ Each repo need to contain:
     - `--archive/-a`
     - `--sign/-s`, will use private key in ~/minisign (Note to self: DONT LEAK)
 - [ ] launch stupid server on my domain
+
+- build: 
+    - hash package with inputs (manifests and deps manifests), i.e hello-2.12.0-<hash>.tar.zst
+    - link against libs in store and ser rpath to that, dont symlink deps to /opt/packa/lib
+
+

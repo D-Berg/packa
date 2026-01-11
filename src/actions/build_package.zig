@@ -6,6 +6,7 @@ const lua_helpers = @import("../lua_helpers.zig");
 const zlua = @import("zlua");
 const assert = std.debug.assert;
 const log = std.log.scoped(.build);
+const Package = @import("../Package.zig");
 
 const bufPrint = std.fmt.bufPrint;
 const bufPrintZ = std.fmt.bufPrintZ;
@@ -16,7 +17,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 // TODO: add copy License fn for pkg.build
-pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildArgs) !void {
+pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ.Map, args: BuildArgs) !void {
     try util.checkSetup(io);
     var timer: std.time.Timer = try .start();
 
@@ -33,15 +34,6 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildA
     defer tmp_dir.close(io);
 
     assert(args.package_name.len > 0);
-    const manifest_path = try std.fmt.bufPrint(&print_buf, "repos/core/manifests/{c}/{s}.lua", .{
-        args.package_name[0],
-        args.package_name,
-    });
-    const man_stat = try packa_dir.statFile(io, manifest_path, .{});
-    const manifest = try packa_dir.readFileAllocOptions(io, manifest_path, gpa, .limited64(man_stat.size + 1), .@"8", 0);
-    defer gpa.free(manifest);
-
-    log.debug("manifest: \n\n{s}\n\n", .{manifest});
 
     var lua: zlua.State = .{ .gpa = gpa };
     try lua.new(0);
@@ -49,57 +41,25 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildA
 
     lua_helpers.setupState(&lua);
 
-    var lua_script_name_buf: [Io.Dir.max_path_bytes]u8 = undefined;
-    const lua_script_name = try bufPrintZ(
-        &lua_script_name_buf,
-        "@/opt/packa/repos/core/{c}/{s}.lua",
-        .{ args.package_name[0], args.package_name },
-    );
-    try lua.loadBuffer(manifest, lua_script_name);
-    try lua.pcall(0, 1, 0);
+    var pkg_list: std.StringArrayHashMapUnmanaged(Package) = .empty;
+    try Package.collect(io, arena, packa_dir, &.{args.package_name}, &pkg_list, &lua, null, true);
+    // TODO: fetch and install deps
 
-    const pkg = lua.getTop();
-    const pkg_name = switch (lua.getField(pkg, "name")) {
-        .string => lua.toLString(-1),
-        else => return error.WrongLuaType,
-    };
-    log.debug("name = {s}", .{pkg_name});
+    if (pkg_list.count() == 0) return error.FailedToCollect;
+    const pkg = pkg_list.values()[pkg_list.count() - 1];
+    const pkg_key = pkg_list.keys()[pkg_list.count() - 1];
 
-    const src_url = switch (lua.getField(pkg, "url")) {
-        .string => lua.toLString(-1),
-        else => return error.WrongLuaType,
-    };
-    log.debug("src_url: {s}", .{src_url});
-
-    const pkg_hash = switch (lua.getField(pkg, "hash")) {
-        .string => lua.toLString(-1),
-        else => return error.WrongLuaType,
-    };
-    log.debug("pkg_hash: {s}", .{pkg_hash});
-
-    const pkg_version = switch (lua.getField(pkg, "version")) {
-        .string => lua.toLString(-1),
-        else => return error.WrongLuaType,
-    };
-    log.debug("pkg_version: {s}", .{pkg_version});
-
-    const build_dir = try tmp_dir.createDirPathOpen(
-        io,
-        try bufPrint(&print_buf, "build-{s}-{s}", .{ pkg_name, pkg_version }),
-        .{},
-    );
+    const build_dir = try tmp_dir.createDirPathOpen(io, try bufPrint(&print_buf, "build-{s}-{f}", .{
+        pkg.name, pkg.version,
+    }), .{});
     defer build_dir.close(io);
 
-    const tar_root_dir_path = try util.unpackSource(io, gpa, cache_dir, src_url, pkg_hash, build_dir);
-    defer gpa.free(tar_root_dir_path);
+    const tar_root_dir_path = try util.unpackSource(io, arena, cache_dir, pkg.source_url, pkg.source_hash, build_dir);
 
     const tar_root_dir = try build_dir.openDir(io, tar_root_dir_path, .{});
     defer tar_root_dir.close(io);
 
-    if (lua.getField(pkg, "build") != .function) {
-        log.err("build need to be a function", .{});
-        return error.WrongLuaType;
-    }
+    assert(lua.getField(pkg.lua_idx, "build") == .function);
 
     // create b = Build{}
     lua.createTable(0, 5);
@@ -116,8 +76,8 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildA
     const prefix_path = blk: { // push prefix to lua state
         if (Io.Dir.path.isAbsolute(args.prefix_path)) {
             if (std.mem.eql(u8, args.prefix_path, "/opt/packa/tmp")) {
-                const prefix_path = try bufPrint(&print_buf, "{s}/{s}-{s}", .{
-                    args.prefix_path, pkg_name, pkg_version,
+                const prefix_path = try bufPrint(&print_buf, "{s}/{s}-{f}-{s}", .{
+                    args.prefix_path, pkg.name, pkg.version, pkg_key[0..32],
                 });
                 break :blk lua.pushlString(prefix_path);
             }
@@ -125,12 +85,13 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildA
         } else {
             var cwd_buf: [Io.Dir.max_path_bytes]u8 = undefined;
             const cwd_path = try std.process.getCwd(&cwd_buf);
-            const prefix_path = try bufPrint(&print_buf, "{s}/{s}", .{
-                cwd_path, args.prefix_path,
+            const prefix_path = try bufPrint(&print_buf, "{s}/{s}/{s}-{f}-{s}", .{
+                cwd_path, args.prefix_path, pkg.name, pkg.version, pkg_key[0..32],
             });
             break :blk lua.pushlString(prefix_path);
         }
     };
+
     lua.setField(b, "prefix");
 
     { // b.run = luaRun
@@ -171,8 +132,8 @@ pub fn build(io: Io, gpa: Allocator, env: *std.process.Environ.Map, args: BuildA
     };
 
     log.info(
-        "Successfully built {s}-{s} located at {s}, built in {D}",
-        .{ pkg_name, pkg_version, prefix_path, timer.lap() },
+        "Successfully built {s}-{f} located at {s}, built in {D}",
+        .{ pkg.name, pkg.version, prefix_path, timer.lap() },
     );
 }
 

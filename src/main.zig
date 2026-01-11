@@ -30,8 +30,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     var arena_impl: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
     defer arena_impl.deinit();
-
-    const arena = arena_impl.allocator();
+    var thread_safe: std.heap.ThreadSafeAllocator = .{ .child_allocator = arena_impl.allocator() };
+    const arena = thread_safe.allocator();
 
     var env = init.environ.createMap(arena) catch |err| { // TODO: arena?
         log.err("Could not get env map: {t}", .{err});
@@ -45,11 +45,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
     const args = try init.args.toSlice(arena);
     const command = try cli.parse(arena, args, null);
     switch (command) {
-        .install => |install_args| actions.install(io, gpa, progress, install_args) catch |err| {
+        .install => |install_args| actions.install(io, gpa, arena, progress, install_args) catch |err| {
             fastExit(1);
             return err;
         },
-        .build => |build_args| actions.build(io, gpa, &env, build_args) catch |err| {
+        .build => |build_args| actions.build(io, gpa, arena, &env, build_args) catch |err| {
             fastExit(1);
             return err;
         },
@@ -61,7 +61,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             fastExit(1);
             return err;
         },
-        .info => |package_name| actions.info(io, gpa, package_name) catch |err| {
+        .info => |package_name| actions.info(io, arena, package_name) catch |err| {
             fastExit(1);
             return err;
         },

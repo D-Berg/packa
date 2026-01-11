@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
+const Package = @import("../Package.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -18,19 +19,12 @@ const log = std.log.scoped(.install);
 pub fn install(
     io: Io,
     gpa: Allocator,
+    arena: Allocator,
     progress: std.Progress.Node,
     args: cli.InstallArgs,
 ) !void {
     try util.checkSetup(io);
-
-    var arena_impl: std.heap.ArenaAllocator = .init(gpa);
-    defer arena_impl.deinit();
-
-    const arena = arena_impl.allocator();
-
-    // var fetch_group: Io.Group = .init;
-    // defer fetch_group.cancel(io);
-    //
+    _ = arena;
 
     const packa_dir = try Io.Dir.cwd().openDir(io, "/opt/packa", .{});
     defer packa_dir.close(io);
@@ -53,30 +47,93 @@ pub fn install(
 
     var pub_keys_buf: [1]minizign.PublicKey = undefined;
     const pub_keys = try minizign.PublicKey.decode(&pub_keys_buf, repo_pub_key);
+    const pub_key = pub_keys[0];
 
-    var initialized_packages: usize = 0;
-    var packages = try arena.alloc(Package, args.package_names.len);
-    defer for (0..initialized_packages) |i| packages[i].deinit();
+    var lua: zlua.State = .{ .gpa = gpa };
+    try lua.new(0);
+    defer lua.close();
+    lua_helpers.setupState(&lua);
 
-    for (args.package_names, 0..) |name, i| {
-        packages[i] = Package{
-            .name = name,
-            .version = undefined,
-            .lua = .{ .gpa = gpa },
-            .progress = progress,
-        };
-        try packages[i].lua.new(0);
-        initialized_packages += 1;
-
-        try packages[i].tryFetch(io, gpa, &pub_keys[0]);
+    var fetch_list: std.StringArrayHashMapUnmanaged(Package) = .empty;
+    defer {
+        var it = fetch_list.iterator();
+        while (it.next()) |entry| {
+            gpa.free(entry.key_ptr.*);
+            entry.value_ptr.deinit(gpa);
+        }
+        fetch_list.deinit(gpa);
     }
 
-    // try fetch_group.await(io);
+    try Package.collect(io, gpa, packa_dir, args.package_names, &fetch_list, &lua, null, true);
+
+    // _ = progress;
+    // _ = pub_key;
+    try fetchPackages(io, gpa, fetch_list.values(), &pub_key, progress);
+
+    log.debug("fetching {d} packages", .{fetch_list.count()});
+
     log.info("finished installing\n", .{});
 
     // for (args.package_names) |name| {
     //     try installPackage(io, gpa, progress, dir, name, args.approved);
     // }
+}
+
+fn fetchPackages(
+    io: Io,
+    gpa: Allocator,
+    packages: []const Package,
+    pub_key: *const minizign.PublicKey,
+    progress: std.Progress.Node,
+) !void {
+    var fetch_progress = progress.start("fetching", packages.len);
+    defer fetch_progress.end();
+
+    const queue_buf = try gpa.alloc(anyerror!void, packages.len);
+    defer gpa.free(queue_buf);
+    var queue: Io.Queue(anyerror!void) = .init(queue_buf);
+
+    var group: Io.Group = .init;
+    defer group.cancel(io);
+
+    for (packages) |*pkg| {
+        group.async(io, fetchPackage, .{ io, gpa, pkg, &queue, pub_key, fetch_progress });
+    }
+
+    var n_fetched: usize = 0;
+    while (queue.getOne(io)) |res| {
+        if (res) {
+            n_fetched += 1;
+            if (n_fetched == packages.len) break;
+            continue;
+        } else |err| return err;
+        std.debug.print("quing...\n", .{});
+    } else |err| switch (err) {
+        error.Canceled => |e| return e,
+        error.Closed => {
+            unreachable;
+        },
+    }
+    std.debug.print("finished fetching\n", .{});
+}
+
+fn fetchPackage(
+    io: Io,
+    gpa: Allocator,
+    pkg: *const Package,
+    queue: *Io.Queue(anyerror!void),
+    pub_key: *const minizign.PublicKey,
+    progress: std.Progress.Node,
+) Io.Cancelable!void {
+    defer std.debug.print("finished downloading .{s}\n", .{pkg.name});
+    const result = pkg.fetch(io, gpa, pub_key, progress) catch |err| switch (err) {
+        error.Canceled => |e| return e,
+        else => |e| e, // other errors go in the result queue
+    };
+    queue.putOne(io, result) catch |err| switch (err) {
+        error.Canceled => |e| return e,
+        error.Closed => unreachable, // `queue` must not be closed
+    };
 }
 
 fn installPackage(
@@ -95,95 +152,3 @@ fn installPackage(
     const arena = arena_impl.allocator();
     _ = arena;
 }
-
-const Package = struct {
-    name: []const u8,
-    /// filled in by lua
-    version: std.SemanticVersion,
-    lua: zlua.State,
-    progress: std.Progress.Node,
-
-    fn deinit(self: *Package) void {
-        self.lua.close();
-    }
-
-    /// Fetch a binary package and save it in cache if it is signed
-    fn tryFetch(self: *Package, io: Io, gpa: Allocator, pub_key: *const minizign.PublicKey) !void {
-        const lua = self.lua;
-
-        const packa_dir = try Io.Dir.cwd().openDir(io, "/opt/packa", .{});
-        defer packa_dir.close(io);
-
-        assert(self.name.len > 0);
-        var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
-        const manifest_path = try std.fmt.bufPrint(&path_buf, "repos/core/manifests/{c}/{s}.lua", .{
-            self.name[0],
-            self.name,
-        });
-        const man_stat = try packa_dir.statFile(io, manifest_path, .{});
-        const manifest = try packa_dir.readFileAllocOptions(io, manifest_path, gpa, .limited64(man_stat.size + 1), .@"8", 0);
-        defer gpa.free(manifest);
-
-        lua_helpers.setupState(&lua);
-
-        try lua.loadString(manifest);
-        lua.pcall(0, 1, 0) catch {
-            log.err("{s}", .{lua.toLString(-1)});
-            return error.ManifestCrash;
-        };
-
-        const pkg = lua.getTop();
-        const lua_name = switch (lua.getField(pkg, "name")) {
-            .string => lua.toLString(-1),
-            else => return error.WrongLuaType,
-        };
-
-        const version = switch (lua.getField(pkg, "version")) {
-            .string => lua.toLString(-1),
-            else => return error.WrongLuaType,
-        };
-
-        std.debug.print("lua_name = {s}\n", .{lua_name});
-        std.debug.print("version = {s}\n", .{version});
-
-        self.version = try .parse(version);
-
-        const name = self.name;
-
-        var fetch_progress_name_buf: [256]u8 = undefined;
-        const fetch_progrss = self.progress.start(
-            try std.fmt.bufPrint(&fetch_progress_name_buf, "fetching: {s}", .{name}),
-            1,
-        );
-        defer fetch_progrss.end();
-
-        const base_url = "http://localhost:8000"; // TODO get from fn since it can be from multible mirrors
-        const binary_url = try std.fmt.allocPrint(gpa, "{s}/{s}/{s}/{s}-{s}-{t}-{t}.tar.zst", .{
-            base_url, name, version, name, version, builtin.target.cpu.arch, builtin.os.tag,
-        });
-        defer gpa.free(binary_url);
-
-        const minisig_url = try std.fmt.allocPrint(gpa, "{s}/{s}/{s}/{s}-{s}-{t}-{t}.tar.zst.minisig", .{
-            base_url, name, version, name, version, builtin.target.cpu.arch, builtin.os.tag,
-        });
-        defer gpa.free(minisig_url);
-
-        var archive_fut = io.async(util.fetch, .{ io, gpa, binary_url });
-        defer if (archive_fut.cancel(io)) |archive| gpa.free(archive) else |_| {};
-
-        var package_sig_fut = io.async(util.fetch, .{ io, gpa, minisig_url });
-        defer if (package_sig_fut.cancel(io)) |minisig| gpa.free(minisig) else |_| {};
-
-        const archive = try archive_fut.await(io);
-        const packa_sig = try package_sig_fut.await(io); // sig of archive
-
-        var sig = try minizign.Signature.decode(gpa, packa_sig);
-        defer sig.deinit();
-
-        var verifier = try pub_key.verifier(&sig);
-        verifier.update(archive);
-        try verifier.verify(gpa);
-
-        log.debug("package signature matches\n", .{});
-    }
-};
