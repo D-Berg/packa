@@ -17,7 +17,7 @@ name: []const u8,
 /// filled in by lua
 version: std.SemanticVersion,
 // TODO: homepage, ... and other fields
-lua_idx: isize,
+lua_idx: i32,
 desc: []const u8,
 homepage: []const u8,
 license: []const u8,
@@ -119,7 +119,7 @@ pub fn init(
         for (runtime_deps.items) |dep| gpa.free(dep);
     }
 
-    var pop_count: usize = 0;
+    var pop_count: i32 = 0;
     switch (lua.getField(pkg, "deps")) {
         .nil => {},
         .table => {
@@ -130,8 +130,9 @@ pub fn init(
                     const compile = lua.getTop();
                     const len = lua.rawLen(compile);
                     try compile_deps.ensureUnusedCapacity(gpa, len);
-                    for (1..(len + 1)) |i| {
-                        switch (lua.rawGeti(compile, i)) {
+                    var i: isize = 1;
+                    while (i < len + 1) : (i += 1) {
+                        switch (lua.rawGetI(compile, i)) {
                             .string => compile_deps.appendAssumeCapacity(try gpa.dupe(u8, lua.toLString(-1))),
                             else => return error.WrongLuaType,
                         }
@@ -148,8 +149,9 @@ pub fn init(
                     const runtime = lua.getTop();
                     const len = lua.rawLen(runtime);
                     try runtime_deps.ensureUnusedCapacity(gpa, len);
-                    for (1..(len + 1)) |i| {
-                        switch (lua.rawGeti(runtime, i)) {
+                    var i: isize = 1;
+                    while (i < len + 1) : (i += 1) {
+                        switch (lua.rawGetI(runtime, i)) {
                             .string => runtime_deps.appendAssumeCapacity(try gpa.dupe(u8, lua.toLString(-1))),
                             else => return error.WrongLuaType,
                         }

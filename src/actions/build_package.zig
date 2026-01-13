@@ -274,7 +274,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     const argv = arena.alloc([]const u8, n_args) catch @panic("OOM");
     for (0..argv.len) |i| {
-        const lua_idx: isize = @intCast(i + 1);
+        const lua_idx: i32 = @intCast(i + 1);
         switch (lua.typeOf(lua_idx)) {
             .string => argv[i] = lua.toLString(lua_idx),
             inline else => |t| {

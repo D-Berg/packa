@@ -1,67 +1,41 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const actions = @import("actions.zig");
-const util = @import("util.zig");
 const cli = @import("cli.zig");
-const minizign = @import("minizign");
 
-const Io = std.Io;
-const log = std.log;
-
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-pub fn main(init: std.process.Init.Minimal) !void {
-    const gpa, const is_debug = gpa: {
-        break :gpa switch (builtin.mode) {
-            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
-        };
+pub fn main(init: std.process.Init) !void {
+    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
+        .child_allocator = init.arena.allocator(),
     };
-    defer if (is_debug) {
-        _ = debug_allocator.deinit();
-    };
+    const arena = thread_safe_arena.allocator();
 
-    var threaded_io: Io.Threaded = .init(gpa, .{ .environ = init.environ });
-    defer threaded_io.deinit();
-
-    const io = threaded_io.io();
-
-    const progress = std.Progress.start(io, .{});
+    const progress = std.Progress.start(init.io, .{});
     defer progress.end();
 
-    var arena_impl: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
-    defer arena_impl.deinit();
-    var thread_safe: std.heap.ThreadSafeAllocator = .{ .child_allocator = arena_impl.allocator() };
-    const arena = thread_safe.allocator();
-
-    var env = init.environ.createMap(arena) catch |err| { // TODO: arena?
-        log.err("Could not get env map: {t}", .{err});
-        return err;
-    };
-
-    var stdout_buf: [64]u8 = undefined;
-    var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
-    const stdout: *std.Io.Writer = &stdout_w.interface;
-
-    const args = try init.args.toSlice(arena);
+    const args = try init.minimal.args.toSlice(arena);
     const command = try cli.parse(arena, args, null);
     switch (command) {
-        .install => |install_args| actions.install(io, gpa, arena, progress, install_args) catch |err| {
+        .install => |install_args| actions.install(init.io, init.gpa, arena, progress, install_args) catch |err| {
             fastExit(1);
             return err;
         },
-        .build => |build_args| actions.build(io, gpa, arena, &env, build_args) catch |err| {
+        .build => |build_args| actions.build(init.io, init.gpa, arena, init.environ_map, build_args) catch |err| {
             fastExit(1);
             return err;
         },
         .help, .version => |str| {
+            var stdout_buf: [1024]u8 = undefined;
+            var stdout_w = std.Io.File.stdout().writer(init.io, &stdout_buf);
+
+            const stdout: *std.Io.Writer = &stdout_w.interface;
             try stdout.print("{s}\n", .{str});
             try stdout.flush();
         },
-        .setup => actions.setup(io, arena, progress) catch |err| {
+        .setup => actions.setup(init.io, arena, progress) catch |err| {
             fastExit(1);
             return err;
         },
-        .info => |package_name| actions.info(io, arena, package_name) catch |err| {
+        .info => |package_name| actions.info(init.io, arena, package_name) catch |err| {
             fastExit(1);
             return err;
         },
