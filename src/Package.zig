@@ -271,7 +271,7 @@ pub fn fetch(
         name, version, builtin.target.cpu.arch, builtin.os.tag,
     });
 
-    const base_url = "http://localhost:8080"; // TODO get from fn since it can be from multible mirrors
+    const base_url = "https://cdn.packa.dev"; // TODO get from fn since it can be from multible mirrors
     const binary_url = try std.fmt.allocPrint(arena, "{s}/{s}/{f}/{s}", .{
         base_url, name, version, archive_name,
     });
