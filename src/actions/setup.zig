@@ -10,8 +10,8 @@ pub fn setup(io: Io, arena: Allocator, progress: std.Progress.Node) !void {
         return error.AlreadySetup;
     }
 
-    const uid = std.posix.getuid();
-    const gid = std.posix.getgid();
+    const uid = std.posix.system.getuid();
+    const gid = std.posix.system.getgid();
 
     if (uid != 0) { // FIX: bad way of checking privelage
         log.info("Need root privelages", .{});
