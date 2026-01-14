@@ -7,6 +7,22 @@ fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
 
+pub const usage =
+    \\usage: packa [command] [options]
+    \\
+    \\Commands:
+    \\
+    \\  install          Install a pre-built package
+    \\  build            Build a package from source
+    \\  info             Print info of package and exit
+    \\  setup            Setup packa in /opt/packa 
+    \\  version          Print version number and exit
+    \\
+    \\General Options:
+    \\
+    \\  -h, --help       Print command-specific usage
+;
+
 pub const Command = union(enum) {
     install: InstallArgs,
     help: []const u8,
@@ -71,6 +87,8 @@ pub fn parse(gpa: Allocator, args: []const []const u8, diag: ?*Diagnostic) !Comm
         return .setup;
     } else if (eql(arg, "info")) {
         return try parseInfoArgs(&arg_it);
+    } else if (eql(arg, "-h") or eql(arg, "--help")) {
+        return .{ .help = usage };
     }
 
     return error.UnknownCommand;
@@ -137,10 +155,5 @@ fn parseInfoArgs(args: *ArgIterator) !Command {
     const package_name = args.next() orelse return error.InfoMissingPackageName;
     return .{ .info = package_name };
 }
-
-pub const usage =
-    \\Usage of packa
-    \\
-;
 
 // TODO: test cli parsing

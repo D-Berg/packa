@@ -6,7 +6,10 @@ const assert = std.debug.assert;
 
 pub fn setup(io: Io, arena: Allocator, progress: std.Progress.Node) !void {
     if (!std.meta.isError(Io.Dir.cwd().access(io, "/opt/packa", .{}))) {
-        log.err("packa seems to be already setup", .{});
+        log.err(
+            \\Packa seems to be already setup.
+            \\try to delete /opt/packa if you haven't already setup packa
+        , .{});
         return error.AlreadySetup;
     }
 
