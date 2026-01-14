@@ -13,10 +13,8 @@ pub fn setup(io: Io, arena: Allocator, progress: std.Progress.Node) !void {
     const uid = std.posix.system.getuid();
     const gid = std.posix.system.getgid();
 
-    if (uid != 0) { // FIX: bad way of checking privelage
-        log.info("Need root privelages", .{});
-        try run(io, arena, &.{ "sudo", "-v" }, .none, null);
-    }
+    log.info("Need root privelages:", .{});
+    try run(io, arena, &.{ "sudo", "-v" }, .none, null);
 
     const setup_progress = progress.start("setup", 4);
     defer setup_progress.end();
