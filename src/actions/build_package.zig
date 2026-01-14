@@ -18,6 +18,8 @@ const Io = std.Io;
 
 // TODO: add copy License fn for pkg.build
 pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ.Map, args: BuildArgs) !void {
+    _ = env;
+
     try util.checkSetup(io);
     var timer: std.time.Timer = try .start();
 
@@ -94,29 +96,30 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
 
     lua.setField(b, "prefix");
 
+    var build_env: std.process.Environ.Map = .init(arena);
     { // b.run = luaRun
         lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&io))));
         lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&gpa))));
         lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&tar_root_dir))));
-        lua.pushLightUserdata(@ptrCast(@alignCast(env)));
+        lua.pushLightUserdata(@ptrCast(@alignCast(&build_env)));
         lua.pushBoolean(args.verbose);
         lua.pushCClosure(luaRun, 5);
         lua.setField(b, "run");
     }
 
     { // b.env = env;
-        lua.createTable(0, 1);
+        lua.createTable(0, 3);
         const env_table = lua.getTop();
 
-        lua.pushLightUserdata(@ptrCast(@alignCast(env)));
+        lua.pushLightUserdata(@ptrCast(@alignCast(&build_env)));
         lua.pushCClosure(luaEnvSet, 1);
         lua.setField(env_table, "set");
 
-        lua.pushLightUserdata(@ptrCast(@alignCast(env)));
+        lua.pushLightUserdata(@ptrCast(@alignCast(&build_env)));
         lua.pushCClosure(luaEnvGet, 1);
         lua.setField(env_table, "get");
 
-        lua.pushLightUserdata(@ptrCast(@alignCast(env)));
+        lua.pushLightUserdata(@ptrCast(@alignCast(&build_env)));
         lua.pushCClosure(luaEnvAppend, 1);
         lua.setField(env_table, "append");
 
