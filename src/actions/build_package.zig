@@ -214,7 +214,6 @@ fn luaEnvAppend(state: ?*zlua.LuaState) callconv(.c) c_int {
     const key = lua.toLString(1);
     const val = lua.toLString(2);
 
-    // TODO: to panic or not to panic?
     if (env.getPtr(key)) |old_val| {
         const new_val = std.fmt.allocPrint(env.allocator, "{s} {s}", .{ old_val.*, val }) catch @panic("OOM");
         env.allocator.free(old_val.*);
