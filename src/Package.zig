@@ -245,6 +245,7 @@ pub fn fetch(
     self: *const Package,
     io: Io,
     gpa: Allocator,
+    pkg_hash: []const u8,
     pub_key: *const minizign.PublicKey,
     progress: std.Progress.Node,
 ) !void {
@@ -257,7 +258,6 @@ pub fn fetch(
 
     var timer: std.time.Timer = try .start();
 
-    // TODO: HAAAASHHHHHHHH
     const name = self.name;
     const version = self.version;
 
@@ -269,11 +269,11 @@ pub fn fetch(
     defer fetch_progress.end();
 
     // TODO: use hash
-    const archive_name = try std.fmt.allocPrint(arena, "{s}-{f}-{t}-{t}.tar.zst", .{
-        name, version, builtin.target.cpu.arch, builtin.os.tag,
+    const archive_name = try std.fmt.allocPrint(arena, "{s}-{f}-{s}.tar.zst", .{
+        name, version, pkg_hash[0..32],
     });
-    const sig_name = try std.fmt.allocPrint(arena, "{s}-{f}-{t}-{t}.tar.zst.minisig", .{
-        name, version, builtin.target.cpu.arch, builtin.os.tag,
+    const sig_name = try std.fmt.allocPrint(arena, "{s}-{f}-{s}.tar.zst.minisig", .{
+        name, version, pkg_hash[0..32],
     });
 
     const base_url = "https://cdn.packa.dev"; // TODO get from fn since it can be from multible mirrors
@@ -291,11 +291,11 @@ pub fn fetch(
     defer if (package_sig_fut.cancel(io)) |minisig| gpa.free(minisig) else |_| {};
 
     const archive = try archive_fut.await(io);
-    const packa_sig = try package_sig_fut.await(io); // sig of archive
+    const archive_sig = try package_sig_fut.await(io); // sig of archive
 
     std.debug.print("fetched {s} in {D}\n", .{ name, timer.lap() });
 
-    var sig = try minizign.Signature.decode(gpa, packa_sig);
+    var sig = try minizign.Signature.decode(gpa, archive_sig);
     defer sig.deinit();
 
     var verifier = try pub_key.verifier(&sig);
@@ -306,7 +306,7 @@ pub fn fetch(
     defer cache_dir.close(io);
 
     try cache_dir.writeFile(io, .{ .data = archive, .sub_path = archive_name });
-    try cache_dir.writeFile(io, .{ .data = archive, .sub_path = sig_name });
+    try cache_dir.writeFile(io, .{ .data = archive_sig, .sub_path = sig_name });
 
     std.debug.print("verified {s} in {D}\n", .{ name, timer.lap() });
 

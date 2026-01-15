@@ -108,17 +108,7 @@ pub fn unpackSource(
 ) ![]const u8 {
     const tar_file_name = url[1 + std.mem.findScalarLast(u8, url, '/').? ..];
 
-    const compression: Compression = blk: {
-        const str = std.Io.Dir.path.extension(tar_file_name);
-        if (std.mem.eql(u8, str, ".tar")) break :blk .none;
-        if (str.len == 0) @panic("TODO: return error");
-
-        break :blk std.meta.stringToEnum(Compression, str[1..]) orelse {
-            log.err("Unsupported compression method: {s}", .{str});
-            return error.UnsupportedCompression;
-        };
-    };
-
+    const compression: Compression = try .from(url);
     log.debug("compression = {t}", .{compression});
 
     const bytes = blk: {
@@ -179,6 +169,18 @@ const Compression = enum {
     xz,
     gz,
     zst,
+
+    fn from(file_path: []const u8) !Compression {
+        if (std.ascii.endsWithIgnoreCase(file_path, ".tar")) return .none;
+        if (std.ascii.endsWithIgnoreCase(file_path, ".tgz")) return .gz;
+        if (std.ascii.endsWithIgnoreCase(file_path, ".tar.gz")) return .gz;
+        if (std.ascii.endsWithIgnoreCase(file_path, ".txz")) return .xz;
+        if (std.ascii.endsWithIgnoreCase(file_path, ".tar.xz")) return .xz;
+        if (std.ascii.endsWithIgnoreCase(file_path, ".tzst")) return .zst;
+        if (std.ascii.endsWithIgnoreCase(file_path, ".tar.zst")) return .zst;
+
+        return error.InvalidCompression;
+    }
 };
 
 pub fn extractArchive(
@@ -202,14 +204,23 @@ pub fn extractArchive(
             return try tarToDir(io, gpa, &decompressor.reader, out_dir);
         },
         .zst => {
-            const window_len = std.compress.zstd.default_window_len;
+            const window_len = 16 * std.compress.zstd.default_window_len;
             const window_buffer = try gpa.alloc(u8, window_len + std.compress.zstd.block_size_max);
             defer gpa.free(window_buffer);
 
             var decompressor: std.compress.zstd.Decompress = .init(in, window_buffer, .{
                 .window_len = window_len,
             });
-            return try tarToDir(io, gpa, &decompressor.reader, out_dir);
+            { // FIX: remove this when zig asserts stops crashing
+                var aw = Io.Writer.Allocating.init(gpa);
+                defer aw.deinit();
+
+                std.debug.print("{B}\n", .{try decompressor.reader.streamRemaining(&aw.writer)});
+                var r: Io.Reader = .fixed(aw.written());
+                return try tarToDir(io, gpa, &r, out_dir);
+            }
+            // BROKEN
+            // return try tarToDir(io, gpa, &decompressor.reader, out_dir);
         },
     }
 }
@@ -219,10 +230,12 @@ fn tarToDir(io: Io, gpa: Allocator, in: *Io.Reader, out_dir: Io.Dir) ![]const u8
     defer diagnostics.deinit();
 
     try std.tar.pipeToFileSystem(io, out_dir, in, .{
+        // .exclude_empty_directories = true,
         .diagnostics = &diagnostics,
     });
     if (diagnostics.errors.items.len > 0) {
-        // log.warn("{f}", .{diagnostics}); // TODO: if https://codeberg.org/ziglang/zig/pulls/30666 gets merged
+        // TODO: handle errors
+        log.warn("untar had errors", .{});
     }
 
     return try gpa.dupe(u8, diagnostics.root_dir);

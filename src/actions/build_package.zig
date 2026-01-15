@@ -128,9 +128,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
 
     // call pkg.build(b)
     lua.pcall(1, 0, 0) catch |err| {
-        // TODO: run cleanup
-        const err_msg = lua.toLString(-1);
-        log.err("{s}", .{err_msg});
+        log.err("{s}", .{lua.toLString(-1)});
         return err;
     };
 
