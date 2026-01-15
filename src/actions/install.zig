@@ -54,7 +54,7 @@ pub fn install(
     defer lua.close();
     lua_helpers.setupState(&lua);
 
-    var fetch_list: std.StringArrayHashMapUnmanaged(Package) = .empty;
+    var fetch_list: Package.Map = .empty;
     defer {
         var it = fetch_list.iterator();
         while (it.next()) |entry| {

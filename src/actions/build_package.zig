@@ -43,7 +43,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
 
     lua_helpers.setupState(&lua);
 
-    var pkg_list: std.StringArrayHashMapUnmanaged(Package) = .empty;
+    var pkg_list: Package.Map = .empty;
     try Package.collect(io, arena, packa_dir, &.{args.package_name}, &pkg_list, &lua, null, true);
     // TODO: fetch and install deps
 

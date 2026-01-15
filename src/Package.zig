@@ -11,12 +11,13 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+pub const Map = std.StringArrayHashMapUnmanaged(Package);
+
 const Package = @This();
 
+/// Not owned by Package
 name: []const u8,
-/// filled in by lua
 version: std.SemanticVersion,
-// TODO: homepage, ... and other fields
 lua_idx: i32,
 desc: []const u8,
 homepage: []const u8,
@@ -182,13 +183,9 @@ pub fn init(
 }
 
 pub fn deinit(self: *Package, gpa: Allocator) void {
-    for (self.compile_deps.items) |dep| {
-        gpa.free(dep);
-    }
+    for (self.compile_deps.items) |dep| gpa.free(dep);
     self.compile_deps.deinit(gpa);
-    for (self.runtime_deps.items) |dep| {
-        gpa.free(dep);
-    }
+    for (self.runtime_deps.items) |dep| gpa.free(dep);
     self.runtime_deps.deinit(gpa);
     gpa.free(self.source_url);
     gpa.free(self.source_hash);
@@ -202,16 +199,15 @@ pub fn collect(
     gpa: Allocator,
     packa_dir: Io.Dir,
     names: []const []const u8,
-    resolved: *std.StringArrayHashMapUnmanaged(Package),
+    resolved: *Package.Map,
     lua: *const zlua.State,
     parent_hash: ?*std.crypto.hash.Blake3,
     install: bool,
 ) !void {
     var digest: [32]u8 = undefined;
+    var key_buf: [2 * digest.len]u8 = undefined;
     var blake3: std.crypto.hash.Blake3 = .init(.{ .key = null });
     for (names) |name| {
-        defer blake3.reset();
-
         var pkg: Package = try .init(io, gpa, packa_dir, "core", name, lua, &blake3);
         errdefer pkg.deinit(gpa);
         pkg.install = install;
@@ -222,18 +218,23 @@ pub fn collect(
         blake3.final(&digest);
         if (parent_hash) |ph| ph.update(&digest);
 
-        try resolved.ensureUnusedCapacity(gpa, 1);
-        const key = try std.fmt.allocPrint(gpa, "{x}", .{&digest});
-        errdefer comptime unreachable;
-
-        const gop = resolved.getOrPutAssumeCapacity(key);
-        if (gop.found_existing) {
-            gpa.free(key);
-            if (pkg.install) gop.value_ptr.install = true;
+        const key = std.fmt.bufPrint(&key_buf, "{x}", .{&digest}) catch unreachable;
+        assert(key.len == key_buf.len);
+        if (resolved.getPtr(key)) |existing_pkg| {
+            if (builtin.mode == .Debug) assert(std.mem.eql(u8, pkg.name, existing_pkg.name));
+            if (pkg.install) existing_pkg.install = true;
             pkg.deinit(gpa);
-            continue;
+        } else {
+            try resolved.ensureUnusedCapacity(gpa, 1);
+            resolved.putAssumeCapacity(try gpa.dupe(u8, key), pkg);
         }
-        gop.value_ptr.* = pkg;
+
+        if (builtin.mode == .Debug) {
+            digest = undefined;
+            key_buf = undefined;
+        }
+
+        blake3.reset();
     }
 }
 
