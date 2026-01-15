@@ -118,6 +118,8 @@ pub fn init(
     errdefer {
         for (compile_deps.items) |dep| gpa.free(dep);
         for (runtime_deps.items) |dep| gpa.free(dep);
+        compile_deps.deinit(gpa);
+        runtime_deps.deinit(gpa);
     }
 
     var pop_count: i32 = 0;
@@ -142,7 +144,7 @@ pub fn init(
                 },
                 else => return error.WrongLuaType,
             }
-            pop_count += 1;
+            pop_count += 1; // compile
 
             switch (lua.getField(deps, "runtime")) {
                 .nil => {},
@@ -161,11 +163,11 @@ pub fn init(
                 },
                 else => return error.WrongLuaType,
             }
-            pop_count += 1;
+            pop_count += 1; // runtime
         },
         else => return error.WrongLuaType,
     }
-    pop_count += 1;
+    pop_count += 1; // deps
     lua.pop(pop_count);
 
     return .{
