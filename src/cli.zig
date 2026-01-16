@@ -130,6 +130,9 @@ fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
 pub const BuildArgs = struct {
     package_name: []const u8,
     prefix_path: []const u8,
+    archive: bool = false,
+    compress: bool = false,
+    sign: bool = false,
     verbose: bool = false,
 };
 fn parseBuildArgs(args: *ArgIterator) !Command {
@@ -145,6 +148,12 @@ fn parseBuildArgs(args: *ArgIterator) !Command {
             build_args.prefix_path = next;
         } else if (eql(arg, "-v") or eql(arg, "--verbose")) {
             build_args.verbose = true;
+        } else if (eql(arg, "-a") or eql(arg, "--archive")) {
+            build_args.archive = true;
+        } else if (eql(arg, "-c") or eql(arg, "--compress")) {
+            build_args.compress = true;
+        } else if (eql(arg, "-s") or eql(arg, "--sign")) {
+            build_args.sign = true;
         }
     }
 

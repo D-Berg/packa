@@ -132,6 +132,62 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
         return err;
     };
 
+    if (args.archive) {
+        var root_dir_path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+        const root_dir_path = try std.fmt.bufPrint(&root_dir_path_buf, "{s}-{f}-{s}", .{
+            pkg.name, pkg.version, pkg_key[0..32],
+        });
+
+        const root_dir = try tmp_dir.openDir(io, root_dir_path, .{ .iterate = true });
+        defer root_dir.close(io);
+
+        var output_file_path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+        const output_file_path = try std.fmt.bufPrint(&output_file_path_buf, "{s}.tar", .{root_dir_path});
+
+        const output_file = try tmp_dir.createFile(io, output_file_path, .{});
+        defer output_file.close(io);
+
+        var output_writer_buf: [4096]u8 = undefined;
+        var output_writer = output_file.writer(io, &output_writer_buf);
+
+        var tar_w: std.tar.Writer = .{ .underlying_writer = &output_writer.interface };
+        try tar_w.setRoot(root_dir_path);
+
+        var walker = try root_dir.walk(gpa);
+        defer walker.deinit();
+        while (try walker.next(io)) |entry| {
+            switch (entry.kind) {
+                .file => {
+                    const file = try root_dir.openFile(io, entry.path, .{});
+                    defer file.close(io);
+
+                    var file_reader_buf: [4096]u8 = undefined;
+                    var file_reader = file.reader(io, &file_reader_buf);
+
+                    // TODO: make a reader interface that hashes content of file
+                    // to pass to tar archiver
+
+                    try tar_w.writeFile(entry.path, &file_reader, 0);
+                },
+                else => {},
+            }
+        }
+
+        try output_writer.flush();
+
+        if (args.compress) {
+            const term = try std.process.run(arena, io, .{
+                .argv = &.{ "zstd", "-T0", "--ultra", "-20", output_file_path },
+                .cwd_dir = tmp_dir,
+            });
+            _ = term;
+
+            if (args.sign) {
+                // TODO:
+            }
+        }
+    }
+
     log.info(
         "Successfully built {s}-{f} located at {s}, built in {D}",
         .{ pkg.name, pkg.version, prefix_path, timer.lap() },
