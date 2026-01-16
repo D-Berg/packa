@@ -7,6 +7,10 @@ fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
 
+fn startWith(haystack: []const u8, needle: []const u8) bool {
+    return std.mem.startsWith(u8, haystack, needle);
+}
+
 pub const usage =
     \\usage: packa [command] [options]
     \\
@@ -137,23 +141,40 @@ pub const BuildArgs = struct {
 };
 fn parseBuildArgs(args: *ArgIterator) !Command {
     var build_args: BuildArgs = .{
-        .package_name = undefined,
+        .package_name = "",
         .prefix_path = "/opt/packa/tmp",
     };
-    build_args.package_name = args.next() orelse return error.BuildMissingPackageName;
-
     while (args.next()) |arg| {
-        if (eql(arg, "-p") or eql(arg, "--prefix")) {
-            const next = args.next() orelse return error.BuildMissingPrefixPath;
-            build_args.prefix_path = next;
-        } else if (eql(arg, "-v") or eql(arg, "--verbose")) {
-            build_args.verbose = true;
-        } else if (eql(arg, "-a") or eql(arg, "--archive")) {
-            build_args.archive = true;
-        } else if (eql(arg, "-c") or eql(arg, "--compress")) {
-            build_args.compress = true;
-        } else if (eql(arg, "-s") or eql(arg, "--sign")) {
-            build_args.sign = true;
+        if (startWith(arg, "--")) {
+            if (eql(arg, "--prefix")) {
+                const next = args.next() orelse return error.BuildMissingPrefixPath;
+                build_args.prefix_path = next;
+            } else if (eql(arg, "--verbose")) {
+                build_args.verbose = true;
+            } else if (eql(arg, "--archive")) {
+                build_args.archive = true;
+            } else if (eql(arg, "--compress")) {
+                build_args.compress = true;
+            } else if (eql(arg, "--sign")) {
+                build_args.sign = true;
+            }
+        } else if (startWith(arg, "-")) {
+            for (arg[1..], 1..) |c, i| switch (c) {
+                'p' => {
+                    if (i != arg.len) return error.WrongFlagPosition;
+                    const next = args.next() orelse return error.BuildMissingPrefixPath;
+                    build_args.prefix_path = next;
+                },
+                'v' => build_args.verbose = true,
+                'a' => build_args.archive = true,
+                'c' => build_args.compress = true,
+                's' => build_args.sign = true,
+                else => return error.UnknownFlag,
+            };
+        } else {
+            if (build_args.package_name.len != 0) return error.PackageNameAlreadySet;
+            assert(arg.len != 0);
+            build_args.package_name = arg;
         }
     }
 
@@ -164,5 +185,7 @@ fn parseInfoArgs(args: *ArgIterator) !Command {
     const package_name = args.next() orelse return error.InfoMissingPackageName;
     return .{ .info = package_name };
 }
+
+// TODO: make a fatal function with no return
 
 // TODO: test cli parsing
