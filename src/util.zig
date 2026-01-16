@@ -48,31 +48,45 @@ pub fn confirm(io: Io, prompt: []const u8, retries: usize) !bool {
     return false;
 }
 
-// TODO: rename to fetch_alloc
 pub fn fetch(io: Io, gpa: Allocator, url: []const u8) ![]const u8 {
     var client: std.http.Client = .{ .io = io, .allocator = gpa };
     defer client.deinit();
 
-    var alloc_writer = std.Io.Writer.Allocating.init(gpa);
-    errdefer alloc_writer.deinit();
+    var aw = std.Io.Writer.Allocating.init(gpa);
+    defer aw.deinit();
 
-    const res = try client.fetch(.{
-        .response_writer = &alloc_writer.writer,
-        .location = .{ .url = url },
+    var req = try client.request(.GET, try .parse(url), .{
+        .keep_alive = true,
     });
+    defer req.deinit();
+    try req.sendBodiless();
 
-    switch (res.status) {
-        .ok => return try alloc_writer.toOwnedSlice(),
-        else => |status| {
-            std.log.err("Failed to fetch from {s}, got status {t}({d})", .{
-                url,
-                status,
-                @intFromEnum(status),
-            });
+    var redirect_buffer: [1024]u8 = undefined;
+    var res = try req.receiveHead(&redirect_buffer);
 
-            return error.FailedFetch;
-        },
+    const decompress_buffer: []u8 = switch (res.head.content_encoding) {
+        .identity => &.{},
+        .zstd => try client.allocator.alloc(u8, std.compress.zstd.default_window_len),
+        .deflate, .gzip => try client.allocator.alloc(u8, std.compress.flate.max_window_len),
+        .compress => return error.UnsupportedCompressionMethod,
+    };
+    defer gpa.free(decompress_buffer);
+
+    var transfer_buffer: [64]u8 = undefined;
+    var decompress: std.http.Decompress = undefined;
+    const reader = res.readerDecompressing(&transfer_buffer, &decompress, decompress_buffer);
+
+    var offset: usize = 0;
+    while (true) {
+        offset += reader.stream(&aw.writer, .unlimited) catch |err| switch (err) {
+            error.EndOfStream => break,
+            error.ReadFailed => return res.bodyErr().?,
+            else => |e| return e,
+        };
+        // TODO: progressbar
     }
+
+    return try aw.toOwnedSlice();
 }
 
 pub fn calcHash(
@@ -119,7 +133,11 @@ pub fn unpackSource(
             if (std.mem.eql(u8, pkg_hash, hash[0..])) {
                 log.debug("hashes matches", .{});
             } else {
-                log.err("hashes DONT match, expected {s}, got {s}", .{ pkg_hash, hash });
+                log.err(
+                    \\hashes DONT match for {s}:
+                    \\expected: {s},
+                    \\recieved: {s}
+                , .{ tar_file_name, pkg_hash, hash });
                 return error.MalformedHash;
             }
 
