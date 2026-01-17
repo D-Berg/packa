@@ -75,17 +75,6 @@ pub fn fetch(io: Io, gpa: Allocator, url: []const u8) ![]const u8 {
     }
 }
 
-pub fn saveSliceToFile(io: Io, dir: Io.Dir, file_name: []const u8, data: []const u8) !void {
-    var save_file = try dir.createFile(io, file_name, .{});
-    defer save_file.close(io);
-
-    var file_write_buf: [1024]u8 = undefined;
-    var file_writer = save_file.writer(io, &file_write_buf);
-
-    try file_writer.interface.writeAll(data);
-    try file_writer.interface.flush();
-}
-
 pub fn calcHash(
     io: Io,
     gpa: Allocator,
