@@ -6,6 +6,7 @@ const cli = @import("../cli.zig");
 const lua_helpers = @import("../lua_helpers.zig");
 const minizign = @import("minizign");
 const Package = @import("../Package.zig");
+const string = @import("../string.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -51,8 +52,15 @@ pub fn info(io: Io, gpa: Allocator, package_name: []const u8) !void {
 
     lua_helpers.setupState(&lua);
 
-    var pkg: Package = try .init(io, gpa, packa_dir, "core", package_name, &lua, null);
-    defer pkg.deinit(gpa);
+    var string_state: string.State = .empty;
+    defer string_state.deinit(gpa);
+    var deps: Package.DependencyMap = .empty;
+    defer deps.deinit(gpa);
+
+    var state: Package.State = .empty;
+    defer state.deinit(gpa);
+
+    const pkg_id = try Package.collect(io, gpa, &state, packa_dir, package_name, &lua, false);
 
     var stdout_buf: [1024]u8 = undefined;
     var stdout_writer = Io.File.stdout().writer(io, &stdout_buf);
@@ -66,33 +74,41 @@ pub fn info(io: Io, gpa: Allocator, package_name: []const u8) !void {
     // TODO: check if binarie exist
     // TODO: insert fake build fn args and print build steps
 
-    try printInfo(terminal, &pkg);
+    try printInfo(terminal, pkg_id, &state);
     try terminal.writer.flush();
 }
 
 fn printInfo(
     t: Io.Terminal,
-    pkg: *const Package,
+    pkg_id: Package.Id,
+    state: *const Package.State,
 ) !void {
+    const pkg = state.packages.get(@intFromEnum(state.package_table.get(pkg_id).?));
+
     try t.setColor(.bold);
-    try t.writer.print("{s}-{f}\n", .{ pkg.name, pkg.version });
+    try t.writer.print("{s}-{f}\n", .{ pkg.name.slice(&state.string_state), pkg.version });
     try t.setColor(.reset);
 
-    try t.writer.print("{s}\n\n", .{pkg.desc});
+    try t.writer.print("{s}\n\n", .{pkg.desc.slice(&state.string_state)});
 
     try t.writer.print("{s:<10}", .{"Homepage:"});
     try t.writer.print("\x1b[4m", .{}); // underline
-    try t.writer.print("{s}\n", .{pkg.homepage});
+    try t.writer.print("{s}\n", .{pkg.homepage.slice(&state.string_state)});
     try t.setColor(.reset);
 
     try t.writer.print("{s:<10}", .{"License:"});
-    try t.writer.print("{s}\n", .{pkg.license});
+    try t.writer.print("{s}\n", .{pkg.license.slice(&state.string_state)});
 
     try t.writer.print("{s:<10}", .{"Url: "});
     try t.writer.print("\x1b[4m", .{}); // underline
-    try t.writer.print("{s}\n", .{pkg.source_url});
+    try t.writer.print("{s}\n", .{pkg.source_url.slice(&state.string_state)});
     try t.setColor(.reset);
 
     try t.writer.print("{s:<10}", .{"Blake3:"});
-    try t.writer.print("{s}\n", .{pkg.source_hash});
+    try t.writer.print("{s}\n", .{pkg.source_hash.slice(&state.string_state)});
+}
+
+// TODO print dependency tree
+fn printDeps(t: Io.Terminal) !void {
+    _ = t;
 }

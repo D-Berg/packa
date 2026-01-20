@@ -50,3 +50,7 @@ fn fastExit(status: u8) void {
         .ReleaseFast, .ReleaseSmall => std.process.exit(status),
     }
 }
+
+test {
+    _ = @import("string.zig");
+}

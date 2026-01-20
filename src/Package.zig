@@ -5,32 +5,72 @@ const minizign = @import("minizign");
 const util = @import("util.zig");
 const lua_helpers = @import("lua_helpers.zig");
 const log = std.log;
+const string = @import("string.zig");
+const String = string.State.String;
 
 const assert = std.debug.assert;
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-pub const Map = std.StringArrayHashMapUnmanaged(Package);
-
 const Package = @This();
 
-/// Not owned by Package
-name: []const u8,
+/// Holds all data for Package(s)
+/// Since packages are longlived, they are created and only destroyed at program end.
+/// Efficiently store metadata of package by
+///     - interning strings,
+///     - SoA(MultiArrayList) for holding packages and package_table and dependencies
+/// Downside is potential footguns of holding references to a pointer or slice
+/// to long, but quite fun to program with, future self may disagree.
+/// Also need to come up with better name than calling everything State.
+/// Based on [Programming without pointers](https://www.hytradboi.com/2025/05c72e39-c07e-41bc-ac40-85e8308f2917-programming-without-pointers).
+/// Rules:
+///     - no element in array or hashmap are allowed to hold pointers (ArrayList and HashMaps are also pointers).
+pub const State = struct {
+    package_table: std.AutoArrayHashMapUnmanaged(Id, Package.Idx) = .empty,
+    string_state: string.State = .empty,
+    packages: std.MultiArrayList(Package) = .empty,
+    runtime_deps: DependencyMap = .empty,
+    compile_deps: DependencyMap = .empty,
+
+    pub const empty = State{};
+
+    pub fn deinit(self: *State, gpa: Allocator) void {
+        self.package_table.deinit(gpa);
+        self.string_state.deinit(gpa);
+        self.packages.deinit(gpa);
+        self.runtime_deps.deinit(gpa);
+        self.compile_deps.deinit(gpa);
+    }
+};
+
+pub const DependencyMap = std.AutoArrayHashMapUnmanaged(String, Id);
+/// Unique hash(Id) of a Package by hashing OS, cpu Arch, manifests and dependecies manifests.
+pub const Id = String;
+/// idx into State.packages
+pub const Idx = enum(u32) { _ };
+
+name: String,
 version: std.SemanticVersion,
 lua_idx: i32,
-desc: []const u8,
-homepage: []const u8,
-license: []const u8,
-source_url: []const u8,
-source_hash: []const u8,
-compile_deps: std.ArrayList([]const u8) = .empty,
-runtime_deps: std.ArrayList([]const u8) = .empty,
+desc: String,
+homepage: String,
+license: String,
+source_url: String,
+source_hash: String,
 install: bool = false,
+compile_deps: Deps,
+runtime_deps: Deps,
+
+const Deps = struct {
+    start: u32,
+    count: u32,
+};
 
 pub fn init(
     io: Io,
     gpa: Allocator,
+    state: *Package.State,
     packa_dir: Io.Dir,
     repo: []const u8,
     name: []const u8,
@@ -44,7 +84,14 @@ pub fn init(
         repo, name[0], name,
     });
     const manifest_stat = try packa_dir.statFile(io, manifest_path[1..], .{ .follow_symlinks = true });
-    const manifest = try packa_dir.readFileAllocOptions(io, manifest_path[1..], gpa, .limited64(manifest_stat.size + 1), .of(u8), 0);
+    const manifest = try packa_dir.readFileAllocOptions(
+        io,
+        manifest_path[1..],
+        gpa,
+        .limited64(manifest_stat.size + 1),
+        .of(u8),
+        0,
+    );
     defer gpa.free(manifest);
 
     var os_buf: [64]u8 = undefined;
@@ -78,88 +125,92 @@ pub fn init(
     });
     lua.pop(1);
 
-    const desc = try gpa.dupe(u8, switch (lua.getField(pkg, "desc")) {
+    const desc = try state.string_state.internString(gpa, switch (lua.getField(pkg, "desc")) {
         .string => lua.toLString(-1),
         else => return error.WrongLuaType,
     });
-    errdefer gpa.free(desc);
-
-    const homepage = try gpa.dupe(u8, switch (lua.getField(pkg, "homepage")) {
-        .string => lua.toLString(-1),
-        else => return error.WrongLuaType,
-    });
-    errdefer gpa.free(homepage);
-
-    const license = try gpa.dupe(u8, switch (lua.getField(pkg, "license")) {
-        .string => lua.toLString(-1),
-        else => return error.WrongLuaType,
-    });
-    errdefer gpa.free(license);
-
-    const source_url = try gpa.dupe(u8, switch (lua.getField(pkg, "url")) {
-        .string => lua.toLString(-1),
-        else => return error.WrongLuaType,
-    });
-    errdefer gpa.free(source_url);
     lua.pop(1);
 
-    const source_hash = try gpa.dupe(u8, switch (lua.getField(pkg, "hash")) {
+    const homepage = try state.string_state.internString(gpa, switch (lua.getField(pkg, "homepage")) {
         .string => lua.toLString(-1),
         else => return error.WrongLuaType,
     });
-    errdefer gpa.free(source_hash);
+    lua.pop(1);
+
+    const license = try state.string_state.internString(gpa, switch (lua.getField(pkg, "license")) {
+        .string => lua.toLString(-1),
+        else => return error.WrongLuaType,
+    });
+    lua.pop(1);
+
+    const source_url = try state.string_state.internString(gpa, switch (lua.getField(pkg, "url")) {
+        .string => lua.toLString(-1),
+        else => return error.WrongLuaType,
+    });
+    lua.pop(1);
+
+    const source_hash = try state.string_state.internString(gpa, switch (lua.getField(pkg, "hash")) {
+        .string => lua.toLString(-1),
+        else => return error.WrongLuaType,
+    });
     lua.pop(1);
 
     if (lua.getField(pkg, "build") != .function) return error.WrongLuaType;
     lua.pop(1);
 
-    var compile_deps: std.ArrayList([]const u8) = .empty;
-    var runtime_deps: std.ArrayList([]const u8) = .empty;
-    errdefer {
-        for (compile_deps.items) |dep| gpa.free(dep);
-        for (runtime_deps.items) |dep| gpa.free(dep);
-        compile_deps.deinit(gpa);
-        runtime_deps.deinit(gpa);
-    }
+    var runtime_deps: Deps = .{ .start = 0, .count = 0 };
+    var compile_deps: Deps = .{ .start = 0, .count = 0 };
 
     var pop_count: i32 = 0;
     switch (lua.getField(pkg, "deps")) {
         .nil => {},
         .table => {
-            const deps = lua.getTop();
-            switch (lua.getField(deps, "compile")) {
+            const lua_deps = lua.getTop();
+            switch (lua.getField(lua_deps, "compile")) {
                 .nil => {},
                 .table => {
+                    compile_deps.start = @intCast(state.compile_deps.count());
+
                     const compile = lua.getTop();
                     const len = lua.rawLen(compile);
-                    try compile_deps.ensureUnusedCapacity(gpa, len);
+                    try state.compile_deps.ensureUnusedCapacity(gpa, len);
                     var i: isize = 1;
                     while (i < len + 1) : (i += 1) {
                         switch (lua.rawGetI(compile, i)) {
-                            .string => compile_deps.appendAssumeCapacity(try gpa.dupe(u8, lua.toLString(-1))),
+                            .string => state.compile_deps.putAssumeCapacity(
+                                try state.string_state.internString(gpa, lua.toLString(-1)),
+                                .none, // package id is unresolved
+                            ),
                             else => return error.WrongLuaType,
                         }
                         pop_count += 1;
                     }
+                    compile_deps.count = @intCast(len);
                 },
                 else => return error.WrongLuaType,
             }
             pop_count += 1; // compile
 
-            switch (lua.getField(deps, "runtime")) {
+            switch (lua.getField(lua_deps, "runtime")) {
                 .nil => {},
                 .table => {
+                    runtime_deps.start = @intCast(state.runtime_deps.count());
                     const runtime = lua.getTop();
                     const len = lua.rawLen(runtime);
-                    try runtime_deps.ensureUnusedCapacity(gpa, len);
+                    try state.runtime_deps.ensureUnusedCapacity(gpa, len);
                     var i: isize = 1;
                     while (i < len + 1) : (i += 1) {
                         switch (lua.rawGetI(runtime, i)) {
-                            .string => runtime_deps.appendAssumeCapacity(try gpa.dupe(u8, lua.toLString(-1))),
+                            .string => state.runtime_deps.putAssumeCapacity(
+                                try state.string_state.internString(gpa, lua.toLString(-1)),
+                                .none,
+                            ),
                             else => return error.WrongLuaType,
                         }
                         pop_count += 1;
                     }
+
+                    runtime_deps.count = @intCast(len);
                 },
                 else => return error.WrongLuaType,
             }
@@ -171,7 +222,7 @@ pub fn init(
     lua.pop(pop_count);
 
     return .{
-        .name = name,
+        .name = try state.string_state.internString(gpa, name),
         .version = version,
         .source_url = source_url,
         .source_hash = source_hash,
@@ -184,131 +235,55 @@ pub fn init(
     };
 }
 
-pub fn deinit(self: *Package, gpa: Allocator) void {
-    for (self.compile_deps.items) |dep| gpa.free(dep);
-    self.compile_deps.deinit(gpa);
-    for (self.runtime_deps.items) |dep| gpa.free(dep);
-    self.runtime_deps.deinit(gpa);
-    gpa.free(self.source_url);
-    gpa.free(self.source_hash);
-    gpa.free(self.license);
-    gpa.free(self.homepage);
-    gpa.free(self.desc);
-}
-
+/// Initialises a package based on its name and collects its dependencies
 pub fn collect(
     io: Io,
     gpa: Allocator,
+    state: *Package.State,
     packa_dir: Io.Dir,
-    names: []const []const u8,
-    resolved: *Package.Map,
+    name: []const u8,
     lua: *const zlua.State,
-    parent_hash: ?*std.crypto.hash.Blake3,
     install: bool,
-) !void {
+) !Id {
     var digest: [32]u8 = undefined;
     var key_buf: [2 * digest.len]u8 = undefined;
     var blake3: std.crypto.hash.Blake3 = .init(.{ .key = null });
-    for (names) |name| {
-        var pkg: Package = try .init(io, gpa, packa_dir, "core", name, lua, &blake3);
-        errdefer pkg.deinit(gpa);
-        pkg.install = install;
 
-        try collect(io, gpa, packa_dir, pkg.compile_deps.items, resolved, lua, &blake3, false);
-        try collect(io, gpa, packa_dir, pkg.runtime_deps.items, resolved, lua, &blake3, true);
-
-        blake3.final(&digest);
-        if (parent_hash) |ph| ph.update(&digest);
-
-        const key = std.fmt.bufPrint(&key_buf, "{x}", .{&digest}) catch unreachable;
-        assert(key.len == key_buf.len);
-        if (resolved.getPtr(key)) |existing_pkg| {
-            if (builtin.mode == .Debug) assert(std.mem.eql(u8, pkg.name, existing_pkg.name));
-            if (pkg.install) existing_pkg.install = true;
-            pkg.deinit(gpa);
-        } else {
-            try resolved.ensureUnusedCapacity(gpa, 1);
-            resolved.putAssumeCapacity(try gpa.dupe(u8, key), pkg);
-        }
-
-        if (builtin.mode == .Debug) {
-            digest = undefined;
-            key_buf = undefined;
-        }
-
-        blake3.reset();
-    }
-}
-
-/// Fetch a binary package and save it in cache if it is signed
-pub fn fetch(
-    self: *const Package,
-    io: Io,
-    gpa: Allocator,
-    pkg_hash: []const u8,
-    pub_key: *const minizign.PublicKey,
-    progress: std.Progress.Node,
-) !void {
-    assert(self.name.len > 0);
-
-    var arena_impl: std.heap.ArenaAllocator = .init(gpa);
-    defer arena_impl.deinit();
-
-    const arena = arena_impl.allocator();
-
-    var timer: std.time.Timer = try .start();
-
-    const name = self.name;
-    const version = self.version;
-
-    var fetch_progress_name_buf: [256]u8 = undefined;
-    const fetch_progress = progress.start(
-        try std.fmt.bufPrint(&fetch_progress_name_buf, "{s}-{f}", .{ name, version }),
-        1,
+    try state.packages.ensureUnusedCapacity(gpa, 1);
+    const pkg_idx = state.packages.addOneAssumeCapacity();
+    state.packages.set(
+        pkg_idx,
+        try .init(io, gpa, state, packa_dir, "core", name, lua, &blake3),
     );
-    defer fetch_progress.end();
+    state.packages.items(.install)[pkg_idx] = install;
 
-    // TODO: use hash
-    const archive_name = try std.fmt.allocPrint(arena, "{s}-{f}-{s}.tar.zst", .{
-        name, version, pkg_hash[0..32],
-    });
-    const sig_name = try std.fmt.allocPrint(arena, "{s}-{f}-{s}.tar.zst.minisig", .{
-        name, version, pkg_hash[0..32],
-    });
+    var name_buf: [128]u8 = undefined;
+    const runtime_deps = state.packages.items(.runtime_deps)[pkg_idx];
+    for (state.runtime_deps.keys()[runtime_deps.start..][0..runtime_deps.count]) |run_dep| {
+        const dep_name = try std.fmt.bufPrint(&name_buf, "{s}", .{run_dep.slice(&state.string_state)});
+        const id = try collect(io, gpa, state, packa_dir, dep_name, lua, true);
+        state.runtime_deps.getPtr(run_dep).?.* = id;
+        blake3.update(id.slice(&state.string_state));
+    }
 
-    const base_url = "https://cdn.packa.dev"; // TODO get from fn since it can be from multible mirrors
-    const binary_url = try std.fmt.allocPrint(arena, "{s}/{s}/{f}/{s}", .{
-        base_url, name, version, archive_name,
-    });
-    const minisig_url = try std.fmt.allocPrint(arena, "{s}/{s}/{f}/{s}", .{
-        base_url, name, version, sig_name,
-    });
+    const compile_deps = state.packages.items(.compile_deps)[pkg_idx];
+    for (state.compile_deps.keys()[compile_deps.start..][0..compile_deps.count]) |comp_dep| {
+        const dep_name = try std.fmt.bufPrint(&name_buf, "{s}", .{comp_dep.slice(&state.string_state)});
+        const id = try collect(io, gpa, state, packa_dir, dep_name, lua, false);
+        state.compile_deps.getPtr(comp_dep).?.* = id;
+        blake3.update(id.slice(&state.string_state));
+    }
 
-    var archive_fut = io.async(util.fetch, .{ io, gpa, binary_url });
-    defer if (archive_fut.cancel(io)) |archive| gpa.free(archive) else |_| {};
+    blake3.final(&digest);
+    const key = std.fmt.bufPrint(&key_buf, "{x}", .{&digest}) catch unreachable;
+    assert(key.len == key_buf.len);
 
-    var package_sig_fut = io.async(util.fetch, .{ io, gpa, minisig_url });
-    defer if (package_sig_fut.cancel(io)) |minisig| gpa.free(minisig) else |_| {};
-
-    const archive = try archive_fut.await(io);
-    const archive_sig = try package_sig_fut.await(io); // sig of archive
-
-    std.debug.print("fetched {s} in {D}\n", .{ name, timer.lap() });
-
-    var sig = try minizign.Signature.decode(gpa, archive_sig);
-    defer sig.deinit();
-
-    var verifier = try pub_key.verifier(&sig);
-    verifier.update(archive);
-    try verifier.verify(gpa);
-
-    const cache_dir = try Io.Dir.cwd().openDir(io, "/opt/packa/cache", .{});
-    defer cache_dir.close(io);
-
-    try cache_dir.writeFile(io, .{ .data = archive, .sub_path = archive_name });
-    try cache_dir.writeFile(io, .{ .data = archive_sig, .sub_path = sig_name });
-
-    std.debug.print("verified {s} in {D}\n", .{ name, timer.lap() });
-
-    log.debug("package signature matches\n", .{});
+    const key_string = try state.string_state.internString(gpa, key);
+    const gop = try state.package_table.getOrPut(gpa, key_string);
+    if (gop.found_existing and builtin.mode == .Debug) {
+        const names = state.packages.items(.name);
+        assert(names[@intFromEnum(gop.value_ptr.*)] == names[pkg_idx]);
+    }
+    gop.value_ptr.* = @enumFromInt(pkg_idx);
+    return key_string;
 }

@@ -43,20 +43,29 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
 
     lua_helpers.setupState(&lua);
 
-    var pkg_list: Package.Map = .empty;
-    try Package.collect(io, arena, packa_dir, &.{args.package_name}, &pkg_list, &lua, null, true);
+    var state: Package.State = .empty;
+    const pkg_id = try Package.collect(io, arena, &state, packa_dir, args.package_name, &lua, true);
     // TODO: fetch and install deps
 
-    if (pkg_list.count() == 0) return error.FailedToCollect;
-    const pkg = pkg_list.values()[pkg_list.count() - 1];
-    const pkg_key = pkg_list.keys()[pkg_list.count() - 1];
+    const pkg_idx = state.package_table.get(pkg_id) orelse return error.FailedToCollectPackage;
+    const pkg = state.packages.get(@intFromEnum(pkg_idx));
+
+    const pkg_key = pkg_id.slice(&state.string_state);
+    const pkg_name = pkg.name.slice(&state.string_state);
 
     const build_dir = try tmp_dir.createDirPathOpen(io, try bufPrint(&print_buf, "build-{s}-{f}", .{
-        pkg.name, pkg.version,
+        pkg_name, pkg.version,
     }), .{});
     defer build_dir.close(io);
 
-    const tar_root_dir_path = try util.unpackSource(io, arena, cache_dir, pkg.source_url, pkg.source_hash, build_dir);
+    const tar_root_dir_path = try util.unpackSource(
+        io,
+        arena,
+        cache_dir,
+        pkg.source_url.slice(&state.string_state),
+        pkg.source_hash.slice(&state.string_state),
+        build_dir,
+    );
 
     const tar_root_dir = try build_dir.openDir(io, tar_root_dir_path, .{});
     defer tar_root_dir.close(io);
@@ -79,7 +88,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
         if (Io.Dir.path.isAbsolute(args.prefix_path)) {
             if (std.mem.eql(u8, args.prefix_path, "/opt/packa/tmp")) {
                 const prefix_path = try bufPrint(&print_buf, "{s}/{s}-{f}-{s}", .{
-                    args.prefix_path, pkg.name, pkg.version, pkg_key[0..32],
+                    args.prefix_path, pkg_name, pkg.version, pkg_key[0..32],
                 });
                 break :blk lua.pushlString(prefix_path);
             }
@@ -88,7 +97,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
             var cwd_buf: [Io.Dir.max_path_bytes]u8 = undefined;
             const cwd_path = try std.process.getCwd(&cwd_buf);
             const prefix_path = try bufPrint(&print_buf, "{s}/{s}/{s}-{f}-{s}", .{
-                cwd_path, args.prefix_path, pkg.name, pkg.version, pkg_key[0..32],
+                cwd_path, args.prefix_path, pkg_name, pkg.version, pkg_key[0..32],
             });
             break :blk lua.pushlString(prefix_path);
         }
@@ -135,7 +144,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     if (args.archive) {
         var root_dir_path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
         const root_dir_path = try std.fmt.bufPrint(&root_dir_path_buf, "{s}-{f}-{s}", .{
-            pkg.name, pkg.version, pkg_key[0..32],
+            pkg_name, pkg.version, pkg_key[0..32],
         });
 
         const root_dir = try tmp_dir.openDir(io, root_dir_path, .{ .iterate = true });
@@ -190,7 +199,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
 
     log.info(
         "Successfully built {s}-{f} located at {s}, built in {D}",
-        .{ pkg.name, pkg.version, prefix_path, timer.lap() },
+        .{ pkg_name, pkg.version, prefix_path, timer.lap() },
     );
 }
 
