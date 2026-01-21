@@ -256,32 +256,21 @@ pub fn collect(
     );
     state.packages.items(.install)[pkg_idx] = install;
 
+    const runtime_deps: Deps = state.packages.items(.runtime_deps)[pkg_idx];
+    const compile_deps: Deps = state.packages.items(.compile_deps)[pkg_idx];
+
+    // Buffer to hold temp name since holding slice of string is not stable when modifying state
     var name_buf: [128]u8 = undefined;
-
-    // temporarily copy dependencie keys since iterating and modifying is unstable
-    const runtime_deps = state.packages.items(.runtime_deps)[pkg_idx];
-    const compile_deps = state.packages.items(.compile_deps)[pkg_idx];
-
-    const deps = try gpa.alloc(Dependency, runtime_deps.count + compile_deps.count);
-    defer gpa.free(deps);
-
-    @memcpy(
-        deps[0..runtime_deps.count],
-        state.dependencies.items[runtime_deps.start..][0..runtime_deps.count],
-    );
-    @memcpy(
-        deps[runtime_deps.count..][0..compile_deps.count],
-        state.dependencies.items[compile_deps.start..][0..compile_deps.count],
-    );
-
-    for (deps[0..runtime_deps.count], 0..) |run_dep, i| {
+    for (0..runtime_deps.count) |i| {
+        const run_dep = state.dependencies.items[runtime_deps.start..][i];
         const dep_name = try std.fmt.bufPrint(&name_buf, "{s}", .{run_dep.name.slice(&state.string_state)});
         const id = try collect(io, gpa, state, packa_dir, dep_name, lua, true);
         state.dependencies.items[runtime_deps.start + i].pkg_id = id;
         blake3.update(id.slice(&state.string_state));
     }
 
-    for (deps[runtime_deps.count..][0..compile_deps.count], 0..) |comp_dep, i| {
+    for (0..compile_deps.count) |i| {
+        const comp_dep = state.dependencies.items[compile_deps.start..][i];
         const dep_name = try std.fmt.bufPrint(&name_buf, "{s}", .{comp_dep.name.slice(&state.string_state)});
         const id = try collect(io, gpa, state, packa_dir, dep_name, lua, false);
         state.dependencies.items[compile_deps.start + i].pkg_id = id;
