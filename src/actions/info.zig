@@ -103,7 +103,7 @@ fn printInfo(
     try t.writer.print("{s:<10}", .{"Blake3:"});
     try t.writer.print("{s}\n", .{pkg.source_hash.slice(&state.string_state)});
 
-    if (pkg.compile_deps.count != 0 and pkg.runtime_deps.count != 0) {
+    if (pkg.compile_deps.count != 0 or pkg.runtime_deps.count != 0) {
         try t.writer.print("{s:<10}{s}\n", .{ "Deps:", "compile(◇), runtime(○)" });
         var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
         try printDeps(io, t, pkg_id, state, 0, 0, &path_buf);
