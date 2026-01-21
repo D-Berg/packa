@@ -103,7 +103,7 @@ fn printInfo(
     try t.writer.print("{s:<10}", .{"Blake3:"});
     try t.writer.print("{s}\n", .{pkg.source_hash.slice(&state.string_state)});
 
-    try t.writer.print("Dependencies: compile(◇), runtime(○)\n", .{});
+    try t.writer.print("{s:<10}{s}\n", .{ "Deps:", "compile(◇), runtime(○)" });
 
     var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
 
