@@ -106,13 +106,16 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     lua.setField(b, "prefix");
 
     var build_env: std.process.Environ.Map = .init(arena);
+    const run_ctx: RunContext = .{
+        .io = io,
+        .gpa = gpa,
+        .cwd_dir = tar_root_dir,
+        .env = &build_env,
+        .verbose = args.verbose,
+    };
     { // b.run = luaRun
-        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&io))));
-        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&gpa))));
-        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&tar_root_dir))));
-        lua.pushLightUserdata(@ptrCast(@alignCast(&build_env)));
-        lua.pushBoolean(args.verbose);
-        lua.pushCClosure(luaRun, 5);
+        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&run_ctx))));
+        lua.pushCClosure(luaRun, 1);
         lua.setField(b, "run");
     }
 
@@ -289,7 +292,14 @@ fn luaEnvAppend(state: ?*zlua.LuaState) callconv(.c) c_int {
     return 1;
 }
 
-/// `luaRun(io: Io, gpa: Allocator, cwd_dir: Io.Dir, env: *std.process.Environ.Map, args: []const u8)`
+const RunContext = struct {
+    io: Io,
+    gpa: Allocator,
+    cwd_dir: Io.Dir,
+    env: *const std.process.Environ.Map,
+    verbose: bool,
+};
+/// `luaRun(ctx: RunContext, args: []const u8)`
 fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
 
@@ -300,42 +310,11 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         return 2;
     }
 
-    const io_ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
-        lua.pushNil();
-        _ = lua.pushlString("io userdata was null");
-        return 2;
-    };
-    const io_ptr: *const Io = @ptrCast(@alignCast(io_ud));
-    const io = io_ptr.*;
+    const ctx: *const RunContext = @ptrCast(@alignCast(lua.toUserdata(lua.upvalueIndex(1))));
 
-    const gpa_ud = lua.toUserdata(lua.upvalueIndex(2)) orelse {
-        lua.pushNil();
-        _ = lua.pushlString("gpa userdata was null");
-        return 2;
-    };
-    const gpa_ptr: *const Allocator = @ptrCast(@alignCast(gpa_ud));
-    const gpa = gpa_ptr.*;
-
-    var scratch_arena: std.heap.ArenaAllocator = .init(gpa);
+    var scratch_arena: std.heap.ArenaAllocator = .init(ctx.gpa);
     defer scratch_arena.deinit();
     const arena = scratch_arena.allocator();
-
-    const cwd_dir_ud = lua.toUserdata(lua.upvalueIndex(3)) orelse {
-        lua.pushNil();
-        _ = lua.pushlString("cwd_dir userdata was null");
-        return 2;
-    };
-    const dir_cwd_ptr: *const Io.Dir = @ptrCast(@alignCast(cwd_dir_ud));
-    const cwd_dir = dir_cwd_ptr.*;
-
-    const env_ud = lua.toUserdata(lua.upvalueIndex(4)) orelse {
-        lua.pushNil();
-        _ = lua.pushlString("env userdata was null");
-        return 2;
-    };
-    const env: *const std.process.Environ.Map = @ptrCast(@alignCast(env_ud));
-
-    const verbose = lua.toBoolean(lua.upvalueIndex(5));
 
     const argv = arena.alloc([]const u8, n_args) catch @panic("OOM");
     for (0..argv.len) |i| {
@@ -359,21 +338,21 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     const command = std.mem.join(arena, " ", argv) catch @panic("OOM");
     log.info("{s}", .{command});
-    var child = std.process.spawn(io, .{
+    var child = std.process.spawn(ctx.io, .{
         .argv = argv,
-        .environ_map = env,
-        .cwd_dir = cwd_dir,
-        .stdout = if (verbose) .inherit else .ignore,
-        .stderr = if (verbose) .inherit else .pipe,
+        .environ_map = ctx.env,
+        .cwd_dir = ctx.cwd_dir,
+        .stdout = if (ctx.verbose) .inherit else .ignore,
+        .stderr = if (ctx.verbose) .inherit else .pipe,
     }) catch {
         lua.pushNil();
         _ = lua.pushlString("SpawnError");
         return 2;
     };
-    defer child.kill(io);
+    defer child.kill(ctx.io);
 
     var stderr: std.ArrayList(u8) = .empty;
-    if (!verbose) {
+    if (!ctx.verbose) {
         const KiB = 1024;
         const MiB = 1024 * KiB;
         const max_output_bytes = 2 * MiB;
@@ -405,7 +384,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         }
     }
 
-    const term = child.wait(io) catch |err| {
+    const term = child.wait(ctx.io) catch |err| {
         const err_msg = std.fmt.allocPrint(arena, "{s}: {t}", .{ command, err }) catch @panic("oom");
         lua.pushNil();
         _ = lua.pushlString(err_msg);
@@ -417,7 +396,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
                 lua.pushBoolean(true);
                 return 1;
             }
-            const err_msg = if (verbose) std.fmt.allocPrint(arena, "{s} exited({d})", .{
+            const err_msg = if (ctx.verbose) std.fmt.allocPrint(arena, "{s} exited({d})", .{
                 command, code,
             }) catch @panic("OOM") else std.fmt.allocPrint(
                 arena,
@@ -429,7 +408,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
             return 2;
         },
         inline else => |code| {
-            const err_msg = if (verbose) std.fmt.allocPrint(arena, "{s} terminated: {t}({d})", .{
+            const err_msg = if (ctx.verbose) std.fmt.allocPrint(arena, "{s} terminated: {t}({d})", .{
                 command, term, code,
             }) catch @panic("OOM") else std.fmt.allocPrint(arena, "{s} terminated: {t}({d})\n{s}", .{
                 command, term, code, stderr.items,
