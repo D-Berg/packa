@@ -69,11 +69,12 @@ pub fn info(io: Io, gpa: Allocator, package_name: []const u8) !void {
     // TODO: check if binarie exist
     // TODO: insert fake build fn args and print build steps
 
-    try printInfo(terminal, pkg_id, &state);
+    try printInfo(io, terminal, pkg_id, &state);
     try terminal.writer.flush();
 }
 
 fn printInfo(
+    io: Io,
     t: Io.Terminal,
     pkg_id: Package.Id,
     state: *const Package.State,
@@ -101,9 +102,57 @@ fn printInfo(
 
     try t.writer.print("{s:<10}", .{"Blake3:"});
     try t.writer.print("{s}\n", .{pkg.source_hash.slice(&state.string_state)});
+
+    try t.writer.print("Dependencies: compile(◇), runtime(○)\n", .{});
+
+    var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+
+    try printDeps(io, t, pkg_id, state, true, 0, 0, &path_buf);
 }
 
-// TODO print dependency tree
-fn printDeps(t: Io.Terminal) !void {
-    _ = t;
+fn printDeps(
+    io: Io,
+    t: Io.Terminal,
+    pkg_id: Package.Id,
+    state: *const Package.State,
+    is_root: bool,
+    level: u6,
+    pipes: u64,
+    path_buf: []u8,
+) !void {
+    const pkg = state.packages.get(@intFromEnum(state.package_table.get(pkg_id).?));
+    const comp_deps = state.dependencies.items[pkg.compile_deps.start..][0..pkg.compile_deps.count];
+    const run_deps = state.dependencies.items[pkg.runtime_deps.start..][0..pkg.runtime_deps.count];
+    const total = comp_deps.len + run_deps.len;
+
+    for (0..total) |i| {
+        const is_comp = i < comp_deps.len;
+        const dep = if (is_comp) comp_deps[i] else run_deps[i - comp_deps.len];
+        const is_last = (i == total - 1);
+
+        const dep_pkg = state.packages.get(@intFromEnum(state.package_table.get(dep.pkg_id).?));
+
+        for (0..level) |l| {
+            const pipe = if ((pipes >> @intCast(l)) & 1 == 1) "│  " else "   ";
+            try t.writer.print("{s}", .{pipe});
+        }
+
+        try t.writer.print("{s}", .{if (is_root and i == 0) "╭──" else if (is_last) "╰──" else "├──"});
+        try t.writer.print("{s}", .{if (is_comp) "◇ " else "○ "});
+
+        const path = try std.fmt.bufPrint(path_buf, "{s}-{f}-{s}", .{
+            dep.name.slice(&state.string_state), dep_pkg.version, dep.pkg_id.slice(&state.string_state)[0..32],
+        });
+
+        if (Io.Dir.cwd().access(io, path, .{})) {
+            try t.setColor(.green);
+        } else |_| {
+            try t.setColor(.red);
+        }
+        try t.writer.print("{s}-{f}\n", .{ dep.name.slice(&state.string_state), dep_pkg.version });
+        try t.setColor(.reset);
+
+        const next_pipes = if (is_last) pipes & ~(@as(u64, 1) << level) else pipes | (@as(u64, 1) << level);
+        try printDeps(io, t, dep.pkg_id, state, false, level + 1, next_pipes, path_buf);
+    }
 }
