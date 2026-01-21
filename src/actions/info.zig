@@ -104,7 +104,7 @@ fn printInfo(
     try t.writer.print("{s}\n", .{pkg.source_hash.slice(&state.string_state)});
 
     if (pkg.compile_deps.count != 0 or pkg.runtime_deps.count != 0) {
-        try t.writer.print("{s:<10}{s}\n", .{ "Deps:", "compile(◇), runtime(○)" });
+        try t.writer.print("{s:<10}{s}\n", .{ "Deps:", "compile(◆), runtime(●)" });
         var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
         try printDeps(io, t, pkg_id, state, 0, 0, &path_buf);
     }
@@ -137,7 +137,6 @@ fn printDeps(
         }
 
         try t.writer.print("{s}", .{if (is_last) "╰──" else "├──"});
-        try t.writer.print("{s}", .{if (is_comp) "◇ " else "○ "});
 
         const path = try std.fmt.bufPrint(path_buf, "{s}-{f}-{s}", .{
             dep.name.slice(&state.string_state), dep_pkg.version, dep.pkg_id.slice(&state.string_state)[0..32],
@@ -148,8 +147,9 @@ fn printDeps(
         } else |_| {
             try t.setColor(.red);
         }
-        try t.writer.print("{s}-{f}\n", .{ dep.name.slice(&state.string_state), dep_pkg.version });
+        try t.writer.print("{s}", .{if (is_comp) "◆ " else "● "});
         try t.setColor(.reset);
+        try t.writer.print("{s}-{f}\n", .{ dep.name.slice(&state.string_state), dep_pkg.version });
 
         const next_pipes = if (is_last) pipes & ~(@as(u64, 1) << level) else pipes | (@as(u64, 1) << level);
         try printDeps(io, t, dep.pkg_id, state, level + 1, next_pipes, path_buf);
