@@ -103,11 +103,11 @@ fn printInfo(
     try t.writer.print("{s:<10}", .{"Blake3:"});
     try t.writer.print("{s}\n", .{pkg.source_hash.slice(&state.string_state)});
 
-    try t.writer.print("{s:<10}{s}\n", .{ "Deps:", "compile(◇), runtime(○)" });
-
-    var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
-
-    try printDeps(io, t, pkg_id, state, true, 0, 0, &path_buf);
+    if (pkg.compile_deps.count != 0 and pkg.runtime_deps.count != 0) {
+        try t.writer.print("{s:<10}{s}\n", .{ "Deps:", "compile(◇), runtime(○)" });
+        var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+        try printDeps(io, t, pkg_id, state, 0, 0, &path_buf);
+    }
 }
 
 fn printDeps(
@@ -115,7 +115,6 @@ fn printDeps(
     t: Io.Terminal,
     pkg_id: Package.Id,
     state: *const Package.State,
-    is_root: bool,
     level: u6,
     pipes: u64,
     path_buf: []u8,
@@ -137,7 +136,7 @@ fn printDeps(
             try t.writer.print("{s}", .{pipe});
         }
 
-        try t.writer.print("{s}", .{if (is_root and i == 0) "╭──" else if (is_last) "╰──" else "├──"});
+        try t.writer.print("{s}", .{if (is_last) "╰──" else "├──"});
         try t.writer.print("{s}", .{if (is_comp) "◇ " else "○ "});
 
         const path = try std.fmt.bufPrint(path_buf, "{s}-{f}-{s}", .{
@@ -153,6 +152,6 @@ fn printDeps(
         try t.setColor(.reset);
 
         const next_pipes = if (is_last) pipes & ~(@as(u64, 1) << level) else pipes | (@as(u64, 1) << level);
-        try printDeps(io, t, dep.pkg_id, state, false, level + 1, next_pipes, path_buf);
+        try printDeps(io, t, dep.pkg_id, state, level + 1, next_pipes, path_buf);
     }
 }
