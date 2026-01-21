@@ -52,11 +52,6 @@ pub fn info(io: Io, gpa: Allocator, package_name: []const u8) !void {
 
     lua_helpers.setupState(&lua);
 
-    var string_state: string.State = .empty;
-    defer string_state.deinit(gpa);
-    var deps: Package.DependencyMap = .empty;
-    defer deps.deinit(gpa);
-
     var state: Package.State = .empty;
     defer state.deinit(gpa);
 

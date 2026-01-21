@@ -30,8 +30,7 @@ pub const State = struct {
     package_table: std.AutoArrayHashMapUnmanaged(Id, Package.Idx) = .empty,
     string_state: string.State = .empty,
     packages: std.MultiArrayList(Package) = .empty,
-    runtime_deps: DependencyMap = .empty,
-    compile_deps: DependencyMap = .empty,
+    dependencies: std.ArrayList(Dependency) = .empty,
 
     pub const empty = State{};
 
@@ -39,12 +38,14 @@ pub const State = struct {
         self.package_table.deinit(gpa);
         self.string_state.deinit(gpa);
         self.packages.deinit(gpa);
-        self.runtime_deps.deinit(gpa);
-        self.compile_deps.deinit(gpa);
+        self.dependencies.deinit(gpa);
     }
 };
 
-pub const DependencyMap = std.AutoArrayHashMapUnmanaged(String, Id);
+const Dependency = struct {
+    name: String,
+    pkg_id: Id = .none,
+};
 /// Unique hash(Id) of a Package by hashing OS, cpu Arch, manifests and dependecies manifests.
 pub const Id = String;
 /// idx into State.packages
@@ -169,18 +170,17 @@ pub fn init(
             switch (lua.getField(lua_deps, "compile")) {
                 .nil => {},
                 .table => {
-                    compile_deps.start = @intCast(state.compile_deps.count());
+                    compile_deps.start = @intCast(state.dependencies.items.len);
 
                     const compile = lua.getTop();
                     const len = lua.rawLen(compile);
-                    try state.compile_deps.ensureUnusedCapacity(gpa, len);
+                    try state.dependencies.ensureUnusedCapacity(gpa, len);
                     var i: isize = 1;
                     while (i < len + 1) : (i += 1) {
                         switch (lua.rawGetI(compile, i)) {
-                            .string => state.compile_deps.putAssumeCapacity(
-                                try state.string_state.internString(gpa, lua.toLString(-1)),
-                                .none, // package id is unresolved
-                            ),
+                            .string => state.dependencies.appendAssumeCapacity(.{
+                                .name = try state.string_state.internString(gpa, lua.toLString(-1)),
+                            }),
                             else => return error.WrongLuaType,
                         }
                         pop_count += 1;
@@ -194,17 +194,16 @@ pub fn init(
             switch (lua.getField(lua_deps, "runtime")) {
                 .nil => {},
                 .table => {
-                    runtime_deps.start = @intCast(state.runtime_deps.count());
+                    runtime_deps.start = @intCast(state.dependencies.items.len);
                     const runtime = lua.getTop();
                     const len = lua.rawLen(runtime);
-                    try state.runtime_deps.ensureUnusedCapacity(gpa, len);
+                    try state.dependencies.ensureUnusedCapacity(gpa, len);
                     var i: isize = 1;
                     while (i < len + 1) : (i += 1) {
                         switch (lua.rawGetI(runtime, i)) {
-                            .string => state.runtime_deps.putAssumeCapacity(
-                                try state.string_state.internString(gpa, lua.toLString(-1)),
-                                .none,
-                            ),
+                            .string => state.dependencies.appendAssumeCapacity(.{
+                                .name = try state.string_state.internString(gpa, lua.toLString(-1)),
+                            }),
                             else => return error.WrongLuaType,
                         }
                         pop_count += 1;
@@ -258,19 +257,34 @@ pub fn collect(
     state.packages.items(.install)[pkg_idx] = install;
 
     var name_buf: [128]u8 = undefined;
+
+    // temporarily copy dependencie keys since iterating and modifying is unstable
     const runtime_deps = state.packages.items(.runtime_deps)[pkg_idx];
-    for (state.runtime_deps.keys()[runtime_deps.start..][0..runtime_deps.count]) |run_dep| {
-        const dep_name = try std.fmt.bufPrint(&name_buf, "{s}", .{run_dep.slice(&state.string_state)});
+    const compile_deps = state.packages.items(.compile_deps)[pkg_idx];
+
+    const deps = try gpa.alloc(Dependency, runtime_deps.count + compile_deps.count);
+    defer gpa.free(deps);
+
+    @memcpy(
+        deps[0..runtime_deps.count],
+        state.dependencies.items[runtime_deps.start..][0..runtime_deps.count],
+    );
+    @memcpy(
+        deps[runtime_deps.count..][0..compile_deps.count],
+        state.dependencies.items[compile_deps.start..][0..compile_deps.count],
+    );
+
+    for (deps[0..runtime_deps.count], 0..) |run_dep, i| {
+        const dep_name = try std.fmt.bufPrint(&name_buf, "{s}", .{run_dep.name.slice(&state.string_state)});
         const id = try collect(io, gpa, state, packa_dir, dep_name, lua, true);
-        state.runtime_deps.getPtr(run_dep).?.* = id;
+        state.dependencies.items[runtime_deps.start + i].pkg_id = id;
         blake3.update(id.slice(&state.string_state));
     }
 
-    const compile_deps = state.packages.items(.compile_deps)[pkg_idx];
-    for (state.compile_deps.keys()[compile_deps.start..][0..compile_deps.count]) |comp_dep| {
-        const dep_name = try std.fmt.bufPrint(&name_buf, "{s}", .{comp_dep.slice(&state.string_state)});
+    for (deps[runtime_deps.count..][0..compile_deps.count], 0..) |comp_dep, i| {
+        const dep_name = try std.fmt.bufPrint(&name_buf, "{s}", .{comp_dep.name.slice(&state.string_state)});
         const id = try collect(io, gpa, state, packa_dir, dep_name, lua, false);
-        state.compile_deps.getPtr(comp_dep).?.* = id;
+        state.dependencies.items[compile_deps.start + i].pkg_id = id;
         blake3.update(id.slice(&state.string_state));
     }
 
