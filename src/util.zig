@@ -94,8 +94,17 @@ pub fn calcHash(
     gpa: Allocator,
     in: []const u8,
 ) ![64]u8 {
+    _ = io;
+    _ = gpa;
     var digest: [32]u8 = undefined;
-    try std.crypto.hash.Blake3.hashParallel(in, &digest, .{}, gpa, io);
+
+    // BUG: use parallel when https://codeberg.org/ziglang/zig/issues/30855 gets solved
+    // try std.crypto.hash.Blake3.hashParallel(in, &digest, .{}, gpa, io);
+    {
+        var blake3: std.crypto.hash.Blake3 = .init(.{});
+        blake3.update(in);
+        blake3.final(&digest);
+    }
     var hash_buf: [2 * digest.len]u8 = undefined;
     _ = std.fmt.bufPrint(&hash_buf, "{x}", .{digest[0..]}) catch unreachable;
     return hash_buf;
