@@ -74,15 +74,15 @@ pub fn init(
     state: *Package.State,
     packa_dir: Io.Dir,
     repo: []const u8,
-    name: []const u8,
+    pkg_name: []const u8,
     lua: *const zlua.State,
     hash: ?*std.crypto.hash.Blake3,
 ) !Package {
-    assert(name.len > 0);
+    assert(pkg_name.len > 0);
     assert(repo.len > 0);
     var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const manifest_path = try std.fmt.bufPrintZ(&path_buf, "@/opt/packa/repos/{s}/manifests/{c}/{s}.lua", .{
-        repo, name[0], name,
+        repo, pkg_name[0], pkg_name,
     });
     const manifest_stat = try packa_dir.statFile(io, manifest_path[1..], .{ .follow_symlinks = true });
     const manifest = try packa_dir.readFileAllocOptions(
@@ -95,16 +95,10 @@ pub fn init(
     );
     defer gpa.free(manifest);
 
-    var os_buf: [64]u8 = undefined;
-    var arch_buf: [64]u8 = undefined;
-
-    const os = try std.fmt.bufPrint(&os_buf, "{t}", .{builtin.target.os.tag});
-    const arch = try std.fmt.bufPrint(&arch_buf, "{t}", .{builtin.target.cpu.arch});
-
     if (hash) |h| {
         h.update(manifest);
-        h.update(os);
-        h.update(arch);
+        h.update(std.fmt.comptimePrint("{t}", .{builtin.target.cpu.arch}));
+        h.update(std.fmt.comptimePrint("{t}", .{builtin.target.os.tag}));
     }
 
     try lua.loadBuffer(manifest, manifest_path);
@@ -114,11 +108,16 @@ pub fn init(
     };
     const pkg = lua.getTop();
     // TODO: log errors
-    assert(std.mem.eql(u8, name, switch (lua.getField(pkg, "name")) {
+    const name = try state.string_state.internString(gpa, switch (lua.getField(pkg, "name")) {
         .string => lua.toLString(-1),
         else => return error.WrongLuaType,
-    }));
+    });
     lua.pop(1);
+
+    if (!std.mem.eql(u8, pkg_name, name.slice(&state.string_state))) {
+        log.err("Name differs", .{});
+        return error.WrontPackageName;
+    }
 
     const version: std.SemanticVersion = try .parse(switch (lua.getField(pkg, "version")) {
         .string => lua.toLString(-1),
@@ -221,7 +220,7 @@ pub fn init(
     lua.pop(pop_count);
 
     return .{
-        .name = try state.string_state.internString(gpa, name),
+        .name = name,
         .version = version,
         .source_url = source_url,
         .source_hash = source_hash,
