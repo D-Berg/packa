@@ -164,20 +164,23 @@ pub fn unpackSource(
 
             break :blk try aw.toOwnedSlice();
         } else |_| {
-            const file = try cache_dir.createFile(io, tar_file_name, .{});
-            defer file.close(io);
-
-            var file_writer_buf: [4096]u8 = undefined;
-            var file_writer = file.writer(io, &file_writer_buf);
-
             const bytes = try fetch(io, gpa, url);
             errdefer gpa.free(bytes);
+
+            log.debug("recieved {B}", .{bytes.len});
 
             const hash = try calcHash(io, gpa, bytes);
             if (!std.mem.eql(u8, pkg_hash, hash[0..])) {
                 log.err("hashes DONT match, expected {s}, got {s}", .{ pkg_hash, hash });
                 return error.MalformedHash;
             }
+            log.debug("Hashes match, saving {s} to cache", .{tar_file_name});
+
+            const file = try cache_dir.createFile(io, tar_file_name, .{});
+            defer file.close(io);
+
+            var file_writer_buf: [4096]u8 = undefined;
+            var file_writer = file.writer(io, &file_writer_buf);
 
             var reader: Io.Reader = .fixed(bytes);
             assert(try reader.streamRemaining(&file_writer.interface) == bytes.len);
