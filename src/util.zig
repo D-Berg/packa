@@ -94,10 +94,10 @@ pub fn calcHash(
     gpa: Allocator,
     in: []const u8,
 ) ![64]u8 {
-    var hash: [32]u8 = undefined;
-    try std.crypto.hash.Blake3.hashParallel(in, &hash, .{}, gpa, io);
-    var hash_buf: [2 * hash.len]u8 = undefined;
-    _ = std.fmt.bufPrint(&hash_buf, "{x}", .{hash[0..]}) catch unreachable;
+    var digest: [32]u8 = undefined;
+    try std.crypto.hash.Blake3.hashParallel(in, &digest, .{}, gpa, io);
+    var hash_buf: [2 * digest.len]u8 = undefined;
+    _ = std.fmt.bufPrint(&hash_buf, "{x}", .{digest[0..]}) catch unreachable;
     return hash_buf;
 }
 
