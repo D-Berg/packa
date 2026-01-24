@@ -240,6 +240,8 @@ pub fn extractArchive(
                 .window_len = window_len,
             });
             { // FIX: remove this when zig asserts stops crashing
+                // pipeToFileSystem uses discard
+                // https://github.com/ziglang/zig/issues/25764
                 var aw = Io.Writer.Allocating.init(gpa);
                 defer aw.deinit();
 
