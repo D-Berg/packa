@@ -131,6 +131,15 @@ fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
     } };
 }
 
+const build_usage =
+    \\usage: packa build [options] <package>
+    \\   -a, --archive  
+    \\   -v, --verbose  
+    \\   -p, --prefix <path> 
+    \\   -c, --compress  
+    \\   -s, --sign  
+    \\   -h, --help  
+;
 pub const BuildArgs = struct {
     package_name: []const u8,
     prefix_path: []const u8,
@@ -157,6 +166,8 @@ fn parseBuildArgs(args: *ArgIterator) !Command {
                 build_args.compress = true;
             } else if (eql(arg, "--sign")) {
                 build_args.sign = true;
+            } else if (eql(arg, "--help")) {
+                return .{ .help = build_usage };
             }
         } else if (startWith(arg, "-")) {
             for (arg[1..], 1..) |c, i| switch (c) {
@@ -169,6 +180,7 @@ fn parseBuildArgs(args: *ArgIterator) !Command {
                 'a' => build_args.archive = true,
                 'c' => build_args.compress = true,
                 's' => build_args.sign = true,
+                'h' => return .{ .help = build_usage },
                 else => return error.UnknownFlag,
             };
         } else {
