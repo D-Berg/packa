@@ -138,7 +138,7 @@ fn printDeps(
 
         try t.writer.print("{s}", .{if (is_last) "╰──" else "├──"});
 
-        const path = try std.fmt.bufPrint(path_buf, "{s}-{f}-{s}", .{
+        const path = try std.fmt.bufPrint(path_buf, "/opt/packa/store/{s}-{f}-{s}", .{
             dep.name.slice(&state.string_state), dep_pkg.version, dep.pkg_id.slice(&state.string_state)[0..32],
         });
 
