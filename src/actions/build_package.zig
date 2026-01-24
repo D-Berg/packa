@@ -175,11 +175,14 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
 
                     var file_reader_buf: [4096]u8 = undefined;
                     var file_reader = file.reader(io, &file_reader_buf);
+                    const reader = &file_reader.interface;
 
+                    const stat = try file.stat(io);
                     // TODO: make a reader interface that hashes content of file
                     // to pass to tar archiver
-
-                    try tar_w.writeFile(entry.path, &file_reader, 0);
+                    try tar_w.writeFileStream(entry.path, stat.size, reader, .{
+                        .mode = @intFromEnum(stat.permissions),
+                    });
                 },
                 else => {},
             }
