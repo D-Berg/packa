@@ -130,16 +130,28 @@ pub fn unpackSource(
             const tar_file = try cache_dir.openFile(io, tar_file_name, .{});
             defer tar_file.close(io);
 
-            var tar_file_read_buf: [4096]u8 = undefined;
-            var tar_file_reader = tar_file.reader(io, &tar_file_read_buf);
+            const tar_size = try tar_file.length(io);
+
+            var tar_file_reader = tar_file.reader(io, &.{});
+            const tar_reader: *Io.Reader = &tar_file_reader.interface;
+
+            var blake3: std.crypto.hash.Blake3 = .init(.{});
+            var digest: [32]u8 = undefined;
+
+            var hash_reader_buf: [4096]u8 = undefined;
+            var hash_reader = Io.Reader.hashed(tar_reader, &blake3, &hash_reader_buf);
 
             var aw: Io.Writer.Allocating = .init(gpa);
             defer aw.deinit();
 
-            _ = try tar_file_reader.interface.streamRemaining(&aw.writer);
+            try hash_reader.reader.streamExact64(&aw.writer, tar_size);
+            blake3.final(&digest);
 
-            const hash = try calcHash(io, gpa, aw.written());
-            if (std.mem.eql(u8, pkg_hash, hash[0..])) {
+            var hash_buf: [2 * digest.len]u8 = undefined;
+            const hash = try std.fmt.bufPrint(&hash_buf, "{x}", .{digest[0..]});
+            assert(hash.len == hash_buf.len);
+
+            if (std.mem.eql(u8, pkg_hash, hash)) {
                 log.debug("hashes matches", .{});
             } else {
                 log.err(
