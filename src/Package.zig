@@ -42,7 +42,7 @@ pub const State = struct {
     }
 };
 
-const Dependency = struct {
+pub const Dependency = struct {
     name: String,
     pkg_id: Id = .none,
 };
@@ -63,7 +63,7 @@ install: bool = false,
 compile_deps: Deps,
 runtime_deps: Deps,
 
-const Deps = struct {
+pub const Deps = struct {
     start: u32,
     count: u32,
 };

@@ -124,6 +124,18 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
         lua.setField(b, "run");
     }
 
+    const dep_ctx = DepContext{
+        .io = io,
+        .gpa = gpa,
+        .pkg_id = pkg_id,
+        .pkg_state = &state,
+    };
+    {
+        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&dep_ctx))));
+        lua.pushCClosure(luaDep, 1);
+        lua.setField(b, "dep");
+    }
+
     { // b.env = env;
         lua.createTable(0, 3);
         const env_table = lua.getTop();
@@ -429,4 +441,76 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
             return 2;
         },
     }
+}
+
+const DepContext = struct {
+    io: Io,
+    gpa: Allocator,
+    pkg_id: Package.Id,
+    pkg_state: *const Package.State,
+};
+
+/// `luaDep(ctx: DepContext, name: []const u8)`
+fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
+    const lua: zlua.State = .{ .inner = state.? };
+
+    const ctx: *const DepContext = @ptrCast(@alignCast(lua.toUserdata(lua.upvalueIndex(1))));
+    var arena_impl: std.heap.ArenaAllocator = .init(ctx.gpa);
+    defer arena_impl.deinit();
+
+    // TODO: check arg len and type
+    const dep_name = lua.toLString(1);
+
+    const string_state = &ctx.pkg_state.string_state;
+
+    const arena = arena_impl.allocator();
+
+    const pkg_idx = ctx.pkg_state.package_table.get(ctx.pkg_id) orelse {
+        lua.pushNil();
+        _ = lua.pushlString(std.fmt.allocPrint(arena, "could not find idx for package id {s}, this should not happen", .{
+            ctx.pkg_id.slice(string_state),
+        }) catch @panic("OOM"));
+
+        return 2;
+    };
+
+    const dep_id = get_dep_id: {
+        const pkg_comp_deps: Package.Deps = ctx.pkg_state.packages.items(.compile_deps)[@intFromEnum(pkg_idx)];
+        for (0..pkg_comp_deps.count) |i| {
+            const pkg_dep: Package.Dependency = ctx.pkg_state.dependencies.items[pkg_comp_deps.start..][i];
+            if (std.mem.eql(u8, dep_name, pkg_dep.name.slice(string_state))) {
+                break :get_dep_id pkg_dep.pkg_id;
+            }
+        }
+        lua.pushNil();
+        _ = lua.pushlString(std.fmt.allocPrint(arena, "failed to find package dep id for dependency '{s}'", .{
+            dep_name,
+        }) catch @panic("OOM"));
+
+        return 2;
+    };
+
+    const dep_idx = ctx.pkg_state.package_table.get(dep_id) orelse {
+        lua.pushNil();
+        _ = lua.pushlString(std.fmt.allocPrint(arena, "failed to get package idx for dep id '{s}', this should'nt happen", .{
+            dep_id.slice(string_state),
+        }) catch @panic("OOM"));
+        return 2;
+    };
+    const dep = ctx.pkg_state.packages.get(@intFromEnum(dep_idx));
+
+    const store_path = std.fmt.allocPrint(arena, "/opt/packa/store/{s}-{f}-{s}", .{
+        dep.name.slice(string_state), dep.version, dep_id.slice(string_state)[0..32],
+    }) catch @panic("OOM");
+
+    Io.Dir.cwd().access(ctx.io, store_path, .{}) catch |err| {
+        lua.pushNil();
+        _ = lua.pushlString(std.fmt.allocPrint(arena, "could not access '{s}', err: {t}", .{
+            store_path, err,
+        }) catch @panic("OOM"));
+        return 2;
+    };
+
+    _ = lua.pushlString(store_path);
+    return 1;
 }
