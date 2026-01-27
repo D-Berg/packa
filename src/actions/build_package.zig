@@ -347,9 +347,11 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         .cwd_dir = ctx.cwd_dir,
         .stdout = if (ctx.verbose) .inherit else .ignore,
         .stderr = if (ctx.verbose) .inherit else .pipe,
-    }) catch {
+    }) catch |err| {
         lua.pushNil();
-        _ = lua.pushlString("SpawnError");
+        _ = lua.pushlString(std.fmt.allocPrint(arena, "Failed to run {s}, err: {t}", .{
+            command, err,
+        }) catch @panic("OOM"));
         return 2;
     };
     defer child.kill(ctx.io);
