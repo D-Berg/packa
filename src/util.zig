@@ -221,18 +221,19 @@ pub fn extractArchive(
     out_dir: Io.Dir,
     compression: Compression,
 ) ![]const u8 {
-    switch (compression) {
-        .none => return try tarToDir(io, gpa, in, out_dir),
+    log.debug("extracting tar.{t}", .{compression});
+    const root = root: switch (compression) {
+        .none => try tarToDir(io, gpa, in, out_dir),
         .gz => {
             var decompress_buf: [std.compress.flate.max_window_len]u8 = undefined;
             var decompressor: std.compress.flate.Decompress = .init(in, .gzip, &decompress_buf);
-            return try tarToDir(io, gpa, &decompressor.reader, out_dir);
+            break :root try tarToDir(io, gpa, &decompressor.reader, out_dir);
         },
         .xz => {
             var decompressor: std.compress.xz.Decompress = try .init(in, gpa, &.{});
             defer decompressor.deinit();
 
-            return try tarToDir(io, gpa, &decompressor.reader, out_dir);
+            break :root try tarToDir(io, gpa, &decompressor.reader, out_dir);
         },
         .zst => {
             // TODO: reconsider window_len for decompressing zstd --ultra -20, is default enough?
@@ -251,12 +252,16 @@ pub fn extractArchive(
 
                 std.debug.print("{B}\n", .{try decompressor.reader.streamRemaining(&aw.writer)});
                 var r: Io.Reader = .fixed(aw.written());
-                return try tarToDir(io, gpa, &r, out_dir);
+                break :root try tarToDir(io, gpa, &r, out_dir);
             }
-            // BROKEN
+            // BUG:
             // return try tarToDir(io, gpa, &decompressor.reader, out_dir);
         },
-    }
+    };
+    errdefer comptime unreachable;
+
+    log.debug("finished extracting", .{});
+    return root;
 }
 
 fn tarToDir(io: Io, gpa: Allocator, in: *Io.Reader, out_dir: Io.Dir) ![]const u8 {
