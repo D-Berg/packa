@@ -232,6 +232,7 @@ pub fn extractArchive(
             return try tarToDir(io, gpa, &decompressor.reader, out_dir);
         },
         .zst => {
+            // TODO: reconsider window_len for decompressing zstd --ultra -20, is default enough?
             const window_len = 16 * std.compress.zstd.default_window_len;
             const window_buffer = try gpa.alloc(u8, window_len + std.compress.zstd.block_size_max);
             defer gpa.free(window_buffer);
