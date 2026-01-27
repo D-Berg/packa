@@ -84,6 +84,11 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
     lua.setField(b, "arch");
 
+    {
+        lua.pushInteger(@intCast(try std.Thread.getCpuCount()));
+        lua.setField(b, "ncpu");
+    }
+
     const prefix_path = blk: { // push prefix to lua state
         if (Io.Dir.path.isAbsolute(args.prefix_path)) {
             if (std.mem.eql(u8, args.prefix_path, "/opt/packa/tmp")) {
