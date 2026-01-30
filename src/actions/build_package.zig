@@ -77,11 +77,11 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     const b = lua.getTop();
 
     // b.os = builtin.os.tag
-    _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.os.tag}));
+    _ = lua.pushLString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.os.tag}));
     lua.setField(b, "os");
 
     // b.arch = builtin.cpu.arch
-    _ = lua.pushlString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
+    _ = lua.pushLString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
     lua.setField(b, "arch");
 
     {
@@ -95,16 +95,16 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
                 const prefix_path = try bufPrint(&print_buf, "{s}/{s}-{f}-{s}", .{
                     args.prefix_path, pkg_name, pkg.version, pkg_key[0..32],
                 });
-                break :blk lua.pushlString(prefix_path);
+                break :blk lua.pushLString(prefix_path);
             }
-            break :blk lua.pushlString(args.prefix_path);
+            break :blk lua.pushLString(args.prefix_path);
         } else {
             var cwd_buf: [Io.Dir.max_path_bytes]u8 = undefined;
             const cwd_path = try std.process.getCwd(&cwd_buf);
             const prefix_path = try bufPrint(&print_buf, "{s}/{s}/{s}-{f}-{s}", .{
                 cwd_path, args.prefix_path, pkg_name, pkg.version, pkg_key[0..32],
             });
-            break :blk lua.pushlString(prefix_path);
+            break :blk lua.pushLString(prefix_path);
         }
     };
 
@@ -231,13 +231,13 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
     if (lua.getTop() != 2) {
         lua.pushNil();
-        _ = lua.pushlString("Package.env requires 2 args, key and value");
+        _ = lua.pushLString("Package.env requires 2 args, key and value");
         return 2;
     }
 
     const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
         lua.pushBoolean(false);
-        _ = lua.pushlString("null userdata");
+        _ = lua.pushLString("null userdata");
         return 2;
     };
     const env_map: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
@@ -247,7 +247,7 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     env_map.put(key, value) catch {
         lua.pushNil();
-        _ = lua.pushlString("OOM");
+        _ = lua.pushLString("OOM");
         return 2;
     };
 
@@ -261,20 +261,20 @@ fn luaEnvGet(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
     if (lua.getTop() != 1) {
         lua.pushNil();
-        _ = lua.pushlString("Package.get requires a key");
+        _ = lua.pushLString("Package.get requires a key");
         return 2;
     }
 
     const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
         lua.pushBoolean(false);
-        _ = lua.pushlString("null userdata");
+        _ = lua.pushLString("null userdata");
         return 2;
     };
     const env_map: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
 
     const key = lua.toLString(1);
     if (env_map.get(key)) |val| {
-        _ = lua.pushlString(val);
+        _ = lua.pushLString(val);
         return 1;
     }
 
@@ -286,13 +286,13 @@ fn luaEnvAppend(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
     if (lua.getTop() != 2) {
         lua.pushNil();
-        _ = lua.pushlString("Package.get requires a key and value");
+        _ = lua.pushLString("Package.get requires a key and value");
         return 2;
     }
 
     const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
         lua.pushBoolean(false);
-        _ = lua.pushlString("null userdata");
+        _ = lua.pushLString("null userdata");
         return 2;
     };
     const env: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
@@ -326,7 +326,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const n_args: usize = @intCast(lua.getTop());
     if (n_args < 1) {
         lua.pushNil();
-        _ = lua.pushlString("run requires atleast 1 arg");
+        _ = lua.pushLString("run requires atleast 1 arg");
         return 2;
     }
 
@@ -349,7 +349,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
                 ) catch @panic("OOM");
 
                 lua.pushNil();
-                _ = lua.pushlString(err_msg);
+                _ = lua.pushLString(err_msg);
 
                 return 2;
             },
@@ -366,7 +366,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         .stderr = if (ctx.verbose) .inherit else .pipe,
     }) catch |err| {
         lua.pushNil();
-        _ = lua.pushlString(std.fmt.allocPrint(arena, "Failed to run {s}, err: {t}", .{
+        _ = lua.pushLString(std.fmt.allocPrint(arena, "Failed to run {s}, err: {t}", .{
             command, err,
         }) catch @panic("OOM"));
         return 2;
@@ -399,7 +399,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
             const continue_poll = poller.poll() catch |err| {
                 const err_msg = std.fmt.allocPrint(arena, "{s}: {t}", .{ command, err }) catch @panic("oom");
                 lua.pushNil();
-                _ = lua.pushlString(err_msg);
+                _ = lua.pushLString(err_msg);
                 return 2;
             };
             if (!continue_poll or stderr_r.bufferedLen() > max_output_bytes) break;
@@ -409,7 +409,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const term = child.wait(ctx.io) catch |err| {
         const err_msg = std.fmt.allocPrint(arena, "{s}: {t}", .{ command, err }) catch @panic("oom");
         lua.pushNil();
-        _ = lua.pushlString(err_msg);
+        _ = lua.pushLString(err_msg);
         return 2;
     };
     switch (term) {
@@ -426,7 +426,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
                 .{ command, code, stderr.items },
             ) catch @panic("OOM");
             lua.pushNil();
-            _ = lua.pushlString(err_msg);
+            _ = lua.pushLString(err_msg);
             return 2;
         },
         inline else => |code| {
@@ -437,7 +437,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
             }) catch @panic("OOM");
 
             lua.pushNil();
-            _ = lua.pushlString(err_msg);
+            _ = lua.pushLString(err_msg);
             return 2;
         },
     }
@@ -467,7 +467,7 @@ fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     const pkg_idx = ctx.pkg_state.package_table.get(ctx.pkg_id) orelse {
         lua.pushNil();
-        _ = lua.pushlString(std.fmt.allocPrint(arena, "could not find idx for package id {s}, this should not happen", .{
+        _ = lua.pushLString(std.fmt.allocPrint(arena, "could not find idx for package id {s}, this should not happen", .{
             ctx.pkg_id.slice(string_state),
         }) catch @panic("OOM"));
 
@@ -483,7 +483,7 @@ fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
             }
         }
         lua.pushNil();
-        _ = lua.pushlString(std.fmt.allocPrint(arena, "failed to find package dep id for dependency '{s}'", .{
+        _ = lua.pushLString(std.fmt.allocPrint(arena, "failed to find package dep id for dependency '{s}'", .{
             dep_name,
         }) catch @panic("OOM"));
 
@@ -492,7 +492,7 @@ fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     const dep_idx = ctx.pkg_state.package_table.get(dep_id) orelse {
         lua.pushNil();
-        _ = lua.pushlString(std.fmt.allocPrint(arena, "failed to get package idx for dep id '{s}', this should'nt happen", .{
+        _ = lua.pushLString(std.fmt.allocPrint(arena, "failed to get package idx for dep id '{s}', this should'nt happen", .{
             dep_id.slice(string_state),
         }) catch @panic("OOM"));
         return 2;
@@ -505,12 +505,12 @@ fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     Io.Dir.cwd().access(ctx.io, store_path, .{}) catch |err| {
         lua.pushNil();
-        _ = lua.pushlString(std.fmt.allocPrint(arena, "could not access '{s}', err: {t}", .{
+        _ = lua.pushLString(std.fmt.allocPrint(arena, "could not access '{s}', err: {t}", .{
             store_path, err,
         }) catch @panic("OOM"));
         return 2;
     };
 
-    _ = lua.pushlString(store_path);
+    _ = lua.pushLString(store_path);
     return 1;
 }

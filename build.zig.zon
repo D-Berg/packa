@@ -4,8 +4,8 @@
     .dependencies = .{
         .zlua = .{
             // .path = "../zlua",
-            .url = "git+https://github.com/d-berg/zlua#ecf6d6dab3f6a6c2d994a1c1bfeaa7cf92b8059e",
-            .hash = "zlua-5.5.0-raq1bQVCAABP-ccUzsahBgMlt-SL-uM6hRpfnfwGZfyI",
+            .url = "git+https://github.com/d-berg/zlua#b6c7825843697d30145eab526720f566dff35544",
+            .hash = "zlua-5.5.0-raq1bQVzAACqF_GW8P7aZzTE_NvTG36ITIy_PRF1GWNu",
         },
         .minizign = .{
             .url = "git+https://github.com/jedisct1/zig-minisign.git#6dc959ae4a80ce13f6ca4db7a8915bee6d34d24c",

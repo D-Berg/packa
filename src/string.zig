@@ -79,7 +79,7 @@ test {
     try lua.new(0);
     defer lua.close();
 
-    _ = lua.pushlString("Hello World");
+    _ = lua.pushLString("Hello World");
 
     var state: State = .empty;
     defer state.deinit(gpa);

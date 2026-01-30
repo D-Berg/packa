@@ -3,8 +3,8 @@ const zlua = @import("zlua");
 const builtin = @import("builtin");
 
 pub fn lua_pkg(state: ?*zlua.LuaState) callconv(.c) c_int {
-    _ = state;
-    // TODO: assert nargs
+    const lua: zlua.State = .{ .inner = state.? };
+    lua.checkType(1, .table);
     return 1;
 }
 
@@ -20,7 +20,7 @@ pub fn setupState(lua: *const zlua.State) void {
     lua.pushCFunction(lua_pkg);
     lua.setGlobal("pkg");
 
-    _ = lua.pushlString(std.fmt.comptimePrint("{t}-{t}", .{
+    _ = lua.pushLString(std.fmt.comptimePrint("{t}-{t}", .{
         builtin.cpu.arch, builtin.os.tag,
     }));
     lua.setGlobal("platform");
