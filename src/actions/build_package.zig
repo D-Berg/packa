@@ -166,15 +166,30 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
         return err;
     };
 
+    var root_dir_path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const root_dir_path = try std.fmt.bufPrint(&root_dir_path_buf, "{s}-{f}-{s}", .{
+        pkg_name, pkg.version, pkg_key[0..32],
+    });
+
+    const root_dir = try tmp_dir.openDir(io, root_dir_path, .{ .iterate = true });
+    defer root_dir.close(io);
+
+    const store = try packa_dir.openDir(io, "store", .{});
+    defer store.close(io);
+
+    Io.Dir.rename(tmp_dir, root_dir_path, store, root_dir_path, io) catch |err| switch (err) {
+        Io.Dir.RenameError.IsDir,
+        Io.Dir.RenameError.NotDir,
+        Io.Dir.RenameError.DirNotEmpty,
+        => {
+            log.warn("store path already exist, overwriting old one", .{});
+            try store.deleteTree(io, root_dir_path);
+            try Io.Dir.rename(tmp_dir, root_dir_path, store, root_dir_path, io);
+        },
+        else => return err,
+    };
+
     if (args.archive) {
-        var root_dir_path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
-        const root_dir_path = try std.fmt.bufPrint(&root_dir_path_buf, "{s}-{f}-{s}", .{
-            pkg_name, pkg.version, pkg_key[0..32],
-        });
-
-        const root_dir = try tmp_dir.openDir(io, root_dir_path, .{ .iterate = true });
-        defer root_dir.close(io);
-
         var output_file_path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
         const output_file_path = try std.fmt.bufPrint(&output_file_path_buf, "{s}.tar", .{root_dir_path});
 
