@@ -39,6 +39,10 @@ pub fn main(init: std.process.Init) !void {
             fastExit(1);
             return err;
         },
+        .gc => actions.gc(init.io) catch |err| {
+            fastExit(1);
+            return err;
+        },
     }
     fastExit(0);
 }

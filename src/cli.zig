@@ -34,6 +34,7 @@ pub const Command = union(enum) {
     version: []const u8,
     setup,
     info: []const u8,
+    gc,
 
     pub fn deinit(self: *Command, gpa: Allocator) void {
         switch (self.*) {
@@ -91,6 +92,8 @@ pub fn parse(gpa: Allocator, args: []const []const u8, diag: ?*Diagnostic) !Comm
         return .setup;
     } else if (eql(arg, "info")) {
         return try parseInfoArgs(&arg_it);
+    } else if (eql(arg, "gc")) {
+        return .gc;
     } else if (eql(arg, "-h") or eql(arg, "--help")) {
         return .{ .help = usage };
     }
