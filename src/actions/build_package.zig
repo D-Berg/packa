@@ -73,7 +73,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     assert(lua.getField(pkg.lua_idx, "build") == .function);
 
     // create b = Build{}
-    lua.createTable(0, 5);
+    lua.createTable(0, 8);
     const b = lua.getTop();
 
     // b.os = builtin.os.tag
@@ -84,7 +84,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     _ = lua.pushLString(try std.fmt.bufPrint(&print_buf, "{t}", .{builtin.cpu.arch}));
     lua.setField(b, "arch");
 
-    {
+    { // b.ncpu
         lua.pushInteger(@intCast(try std.Thread.getCpuCount()));
         lua.setField(b, "ncpu");
     }
@@ -135,6 +135,11 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
         lua.pushCClosure(luaDep, 1);
         lua.setField(b, "dep");
     }
+
+    const join_ctx: PathJoinContext = .{ .gpa = gpa };
+    lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&join_ctx))));
+    lua.pushCClosure(luaPathJoin, 1);
+    lua.setField(b, "pathJoin");
 
     { // b.env = env;
         lua.createTable(0, 3);
@@ -512,5 +517,41 @@ fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
     };
 
     _ = lua.pushLString(store_path);
+    return 1;
+}
+
+const PathJoinContext = struct {
+    gpa: Allocator,
+};
+fn luaPathJoin(state: ?*zlua.LuaState) callconv(.c) c_int {
+    const lua: zlua.State = .{ .inner = state.? };
+    const ctx: *const PathJoinContext = @ptrCast(@alignCast(lua.toUserdata(lua.upvalueIndex(1))));
+
+    const argc: usize = @intCast(lua.getTop());
+
+    var arena_impl: std.heap.ArenaAllocator = .init(ctx.gpa);
+    defer arena_impl.deinit();
+
+    const arena = arena_impl.allocator();
+
+    var paths: std.ArrayList([]const u8) = .empty;
+
+    paths.ensureUnusedCapacity(arena, argc) catch @panic("OOM");
+
+    for (1..(argc + 1)) |i| {
+        switch (lua.typeOf(@intCast(i))) {
+            .string => paths.appendAssumeCapacity(lua.toLString(@intCast(i))),
+            else => |t| {
+                lua.pushNil();
+                _ = lua.pushLString(std.fmt.allocPrint(arena, "expected arg[{d}] to be string, got {t}", .{
+                    i, t,
+                }) catch @panic("OOM"));
+                return 2;
+            },
+        }
+    }
+    const joined = std.Io.Dir.path.join(arena, paths.items) catch @panic("OOM");
+    _ = lua.pushLString(joined);
+
     return 1;
 }
