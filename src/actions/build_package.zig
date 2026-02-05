@@ -100,7 +100,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
             break :blk lua.pushLString(args.prefix_path);
         } else {
             var cwd_buf: [Io.Dir.max_path_bytes]u8 = undefined;
-            const cwd_path = try std.process.getCwd(&cwd_buf);
+            const cwd_path = cwd_buf[0..try std.process.currentPath(io, &cwd_buf)];
             const prefix_path = try bufPrint(&print_buf, "{s}/{s}/{s}-{f}-{s}", .{
                 cwd_path, args.prefix_path, pkg_name, pkg.version, pkg_key[0..32],
             });
@@ -230,7 +230,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
         if (args.compress) {
             const term = try std.process.run(arena, io, .{
                 .argv = &.{ "zstd", "-T0", "--ultra", "-20", output_file_path },
-                .cwd_dir = tmp_dir,
+                .cwd = .{ .dir = tmp_dir },
             });
             _ = term;
 
@@ -381,7 +381,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     var child = std.process.spawn(ctx.io, .{
         .argv = argv,
         .environ_map = ctx.env,
-        .cwd_dir = ctx.cwd_dir,
+        .cwd = .{ .dir = ctx.cwd_dir },
         .stdout = if (ctx.verbose) .inherit else .ignore,
         .stderr = if (ctx.verbose) .inherit else .pipe,
     }) catch |err| {
@@ -393,37 +393,30 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     };
     defer child.kill(ctx.io);
 
-    var stderr: std.ArrayList(u8) = .empty;
+    var multi_reader_buffer: Io.File.MultiReader.Buffer(1) = undefined;
+    var multi_reader: Io.File.MultiReader = undefined;
     if (!ctx.verbose) {
         const KiB = 1024;
         const MiB = 1024 * KiB;
         const max_output_bytes = 2 * MiB;
 
-        var poller = std.Io.poll(arena, enum { stderr }, .{
-            .stderr = child.stderr.?,
-        });
-        defer poller.deinit();
+        multi_reader.init(ctx.gpa, ctx.io, multi_reader_buffer.toStreams(), &.{child.stderr.?});
+        defer multi_reader.deinit();
 
-        const stderr_r = poller.reader(.stderr);
-        stderr_r.buffer = stderr.allocatedSlice();
-        stderr_r.seek = 0;
-        stderr_r.end = stderr.items.len;
-        defer {
-            stderr = .{
-                .items = stderr_r.buffer[0..stderr_r.end],
-                .capacity = stderr_r.buffer.len,
-            };
-            stderr_r.buffer = &.{};
-        }
-        while (true) {
-            const continue_poll = poller.poll() catch |err| {
-                const err_msg = std.fmt.allocPrint(arena, "{s}: {t}", .{ command, err }) catch @panic("oom");
+        while (multi_reader.fill(max_output_bytes, .none)) |_| {} else |err| switch (err) {
+            error.EndOfStream => {},
+            else => |e| {
                 lua.pushNil();
-                _ = lua.pushLString(err_msg);
+                _ = lua.pushLString(std.fmt.allocPrint(
+                    arena,
+                    "Reading process stderr failed with err {t}",
+                    .{e},
+                ) catch @panic("OOM"));
                 return 2;
-            };
-            if (!continue_poll or stderr_r.bufferedLen() > max_output_bytes) break;
+            },
         }
+
+        // try multi_reader.checkAnyError();
     }
 
     const term = child.wait(ctx.io) catch |err| {
@@ -443,7 +436,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
             }) catch @panic("OOM") else std.fmt.allocPrint(
                 arena,
                 "{s} exited({d})\n{s}",
-                .{ command, code, stderr.items },
+                .{ command, code, multi_reader.reader(0).buffered() },
             ) catch @panic("OOM");
             lua.pushNil();
             _ = lua.pushLString(err_msg);
@@ -453,7 +446,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
             const err_msg = if (ctx.verbose) std.fmt.allocPrint(arena, "{s} terminated: {t}({d})", .{
                 command, term, code,
             }) catch @panic("OOM") else std.fmt.allocPrint(arena, "{s} terminated: {t}({d})\n{s}", .{
-                command, term, code, stderr.items,
+                command, term, code, multi_reader.reader(0).buffered(),
             }) catch @panic("OOM");
 
             lua.pushNil();

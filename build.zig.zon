@@ -12,7 +12,7 @@
             .hash = "minizign-0.1.7-gg18cYtOAgA0LcAERcDlO1tBVMFl6rOEe_MJJ6cEE2LW",
         },
     },
-    .minimum_zig_version = "0.16.0-dev.2193+fc517bd01",
+    .minimum_zig_version = "0.16.0-dev.2471+e9eadee00",
     .paths = .{""},
     .fingerprint = 0x4a47116fde952397,
 }

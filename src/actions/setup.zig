@@ -71,7 +71,7 @@ fn run(
     const run_result = try std.process.run(arena, io, .{
         .argv = argv,
         .progress_node = run_progress,
-        .cwd_dir = cwd_dir,
+        .cwd = if (cwd_dir) |cwd| .{ .dir = cwd } else .inherit,
     });
     switch (run_result.term) {
         .exited => |code| if (code != 0) {
