@@ -75,10 +75,19 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
         build_dir,
     );
 
-    const tar_root_dir = try build_dir.openDir(io, tar_root_dir_path, .{});
+    const tar_root_dir = build_dir.openDir(io, tar_root_dir_path, .{}) catch |err| {
+        log.err("Failed to open extracted directory '{s}': {t}", .{ tar_root_dir_path, err });
+        return err;
+    };
     defer tar_root_dir.close(io);
 
-    assert(lua.getField(pkg.lua_idx, "build") == .function);
+    switch (lua.getField(pkg.lua_idx, "build")) {
+        .function => {},
+        else => |kind| {
+            log.err("Expected build to be a function, got {t}", .{kind});
+            return error.WrongLuaType;
+        },
+    }
 
     // create b = Build{}
     lua.createTable(0, 8);
