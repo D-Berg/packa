@@ -53,9 +53,17 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     const pkg_key = pkg_id.slice(&state.string_state);
     const pkg_name = pkg.name.slice(&state.string_state);
 
-    const build_dir = try tmp_dir.createDirPathOpen(io, try bufPrint(&print_buf, "build-{s}-{f}", .{
+    const build_dir_path = try std.fmt.allocPrint(arena, "build-{s}-{f}", .{
         pkg_name, pkg.version,
-    }), .{});
+    });
+    tmp_dir.deleteTree(io, build_dir_path) catch |err| {
+        log.err("Failed to delete old build directory '{s}': {t}", .{ build_dir_path, err });
+        return err;
+    };
+    const build_dir = tmp_dir.createDirPathOpen(io, build_dir_path, .{}) catch |err| {
+        log.err("Failed to create temporary build directory '{s}': {t}", .{ build_dir_path, err });
+        return err;
+    };
     defer build_dir.close(io);
 
     const tar_root_dir_path = try util.unpackSource(
