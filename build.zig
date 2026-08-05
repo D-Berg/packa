@@ -1,7 +1,9 @@
 const std = @import("std");
-const log = std.log.scoped(.zig_build);
 
 const manifest = @import("build.zig.zon");
+
+const log = std.log.scoped(.zig_build);
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});

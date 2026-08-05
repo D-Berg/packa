@@ -9,7 +9,7 @@ pub fn lua_pkg(state: ?*zlua.LuaState) callconv(.c) c_int {
 }
 
 pub fn setupState(lua: *const zlua.State) void {
-    lua.requiref("_G", zlua.Lib.base, true);
+    lua.requiref("_G", zlua.Open.base, true);
 
     lua.setGlobal("load");
     lua.pushNil();

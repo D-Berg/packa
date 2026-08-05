@@ -4,10 +4,7 @@ const actions = @import("actions.zig");
 const cli = @import("cli.zig");
 
 pub fn main(init: std.process.Init) !void {
-    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
-        .child_allocator = init.arena.allocator(),
-    };
-    const arena = thread_safe_arena.allocator();
+    const arena = init.arena.allocator();
 
     const progress = std.Progress.start(init.io, .{});
     defer progress.end();

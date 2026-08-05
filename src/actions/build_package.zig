@@ -21,7 +21,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     _ = env;
 
     try util.checkSetup(io);
-    var timer: std.time.Timer = try .start();
+    const start_building_timestamp = std.Io.Timestamp.now(io, .real);
 
     // use for temporary strings
     var print_buf: [4096]u8 = undefined;
@@ -241,8 +241,8 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     }
 
     log.info(
-        "Successfully built {s}-{f} located at {s}, built in {D}",
-        .{ pkg_name, pkg.version, prefix_path, timer.lap() },
+        "Successfully built {s}-{f} located at {s}, built in {f}",
+        .{ pkg_name, pkg.version, prefix_path, start_building_timestamp.durationTo(.now(io, .real)) },
     );
 }
 

@@ -253,7 +253,7 @@ pub fn fetch(
 
     const arena = arena_impl.allocator();
 
-    var timer: std.time.Timer = try .start();
+    const start_fetching_timestamp = std.Io.Timestamp.now(io, .real);
 
     var fetch_progress_name_buf: [256]u8 = undefined;
     const fetch_progress = progress.start(
@@ -287,7 +287,10 @@ pub fn fetch(
     const archive = try archive_fut.await(io);
     const archive_sig = try package_sig_fut.await(io); // sig of archive
 
-    std.debug.print("fetched {s} in {D}\n", .{ name, timer.lap() });
+    std.debug.print("fetched {s} in {f}\n", .{
+        name,
+        start_fetching_timestamp.durationTo(.now(io, .real)),
+    });
 
     var sig = try minizign.Signature.decode(gpa, archive_sig);
     defer sig.deinit();
@@ -302,7 +305,10 @@ pub fn fetch(
     try cache_dir.writeFile(io, .{ .data = archive, .sub_path = archive_name });
     try cache_dir.writeFile(io, .{ .data = archive_sig, .sub_path = sig_name });
 
-    std.debug.print("verified {s} in {D}\n", .{ name, timer.lap() });
+    std.debug.print("verified {s} in {f}\n", .{
+        name,
+        start_fetching_timestamp.durationTo(.now(io, .real)),
+    });
 
     log.debug("package signature matches\n", .{});
 }
