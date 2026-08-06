@@ -18,8 +18,6 @@ const Io = std.Io;
 
 // TODO: add copy License fn for pkg.build
 pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ.Map, args: BuildArgs) !void {
-    _ = env;
-
     try util.checkSetup(io);
     const start_building_timestamp = std.Io.Timestamp.now(io, .real);
 
@@ -52,6 +50,26 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
 
     const pkg_key = pkg_id.slice(&state.string_state);
     const pkg_name = pkg.name.slice(&state.string_state);
+
+    const compile_deps = state.dependencies.items[pkg.compile_deps.start..][0..pkg.compile_deps.count];
+    for (compile_deps) |dependency| {
+        const dep_idx = state.package_table.get(dependency.pkg_id) orelse return error.FailedToCollectPackage;
+        const dep = state.packages.get(@intFromEnum(dep_idx));
+        const dep_name = dep.name.slice(&state.string_state);
+        const dep_key = dependency.pkg_id.slice(&state.string_state);
+        const store_path = try bufPrint(&print_buf, "/opt/packa/store/{s}-{f}-{s}", .{
+            dep_name, dep.version, dep_key[0..32],
+        });
+
+        Io.Dir.cwd().access(io, store_path, .{}) catch {
+            log.info("Building dependency {s}-{f}", .{ dep_name, dep.version });
+            try build(io, gpa, arena, env, .{
+                .package_name = dep_name,
+                .prefix_path = "/opt/packa/tmp",
+                .verbose = args.verbose,
+            });
+        };
+    }
 
     const build_dir_path = try std.fmt.allocPrint(arena, "build-{s}-{f}", .{
         pkg_name, pkg.version,

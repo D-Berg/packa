@@ -34,6 +34,8 @@ pub const State = struct {
 
     pub const empty = State{};
 
+    // TODO: make wrapper api to minimize fault use.
+
     pub fn deinit(self: *State, gpa: Allocator) void {
         self.package_table.deinit(gpa);
         self.string_state.deinit(gpa);
