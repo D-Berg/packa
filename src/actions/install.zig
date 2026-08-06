@@ -68,7 +68,7 @@ pub fn install(
     var lua: zlua.State = .{ .gpa = gpa };
     try lua.new(0);
     defer lua.close();
-    lua_helpers.setupState(&lua);
+    try lua_helpers.setupState(&lua);
 
     var state: Package.State = .empty;
     defer state.deinit(gpa);
