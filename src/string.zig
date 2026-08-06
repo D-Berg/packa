@@ -14,6 +14,7 @@ pub const State = struct {
         state.string_table.deinit(gpa);
     }
 
+    /// Internet String
     pub const String = enum(u32) {
         none = std.math.maxInt(u32),
         _,

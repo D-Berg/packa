@@ -45,16 +45,14 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     const pkg_id = try Package.collect(io, arena, &state, packa_dir, args.package_name, &lua, true);
     // TODO: fetch and install deps
 
-    const pkg_idx = state.package_table.get(pkg_id) orelse return error.FailedToCollectPackage;
-    const pkg = state.packages.get(@intFromEnum(pkg_idx));
+    const pkg = state.get(pkg_id) orelse return error.FailedToCollectPackage;
 
     const pkg_key = pkg_id.slice(&state.string_state);
     const pkg_name = pkg.name.slice(&state.string_state);
 
-    const compile_deps = state.dependencies.items[pkg.compile_deps.start..][0..pkg.compile_deps.count];
+    const compile_deps = state.getDependencies(pkg, .compile);
     for (compile_deps) |dependency| {
-        const dep_idx = state.package_table.get(dependency.pkg_id) orelse return error.FailedToCollectPackage;
-        const dep = state.packages.get(@intFromEnum(dep_idx));
+        const dep = state.get(dependency.pkg_id) orelse return error.FailedToCollectPackage;
         const dep_name = dep.name.slice(&state.string_state);
         const dep_key = dependency.pkg_id.slice(&state.string_state);
         const store_path = try bufPrint(&print_buf, "/opt/packa/store/{s}-{f}-{s}", .{
@@ -521,7 +519,7 @@ fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
 
     const arena = arena_impl.allocator();
 
-    const pkg_idx = ctx.pkg_state.package_table.get(ctx.pkg_id) orelse {
+    const pkg = ctx.pkg_state.get(ctx.pkg_id) orelse {
         lua.pushNil();
         _ = lua.pushLString(std.fmt.allocPrint(arena, "could not find idx for package id {s}, this should not happen", .{
             ctx.pkg_id.slice(string_state),
@@ -531,9 +529,8 @@ fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
     };
 
     const dep_id = get_dep_id: {
-        const pkg_comp_deps: Package.Deps = ctx.pkg_state.packages.items(.compile_deps)[@intFromEnum(pkg_idx)];
-        for (0..pkg_comp_deps.count) |i| {
-            const pkg_dep: Package.Dependency = ctx.pkg_state.dependencies.items[pkg_comp_deps.start..][i];
+        const pkg_compile_deps = ctx.pkg_state.getDependencies(pkg, .compile);
+        for (pkg_compile_deps) |pkg_dep| {
             if (std.mem.eql(u8, dep_name, pkg_dep.name.slice(string_state))) {
                 break :get_dep_id pkg_dep.pkg_id;
             }
@@ -546,15 +543,13 @@ fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
         return 2;
     };
 
-    const dep_idx = ctx.pkg_state.package_table.get(dep_id) orelse {
+    const dep = ctx.pkg_state.get(dep_id) orelse {
         lua.pushNil();
         _ = lua.pushLString(std.fmt.allocPrint(arena, "failed to get package idx for dep id '{s}', this should'nt happen", .{
             dep_id.slice(string_state),
         }) catch @panic("OOM"));
         return 2;
     };
-    const dep = ctx.pkg_state.packages.get(@intFromEnum(dep_idx));
-
     const store_path = std.fmt.allocPrint(arena, "/opt/packa/store/{s}-{f}-{s}", .{
         dep.name.slice(string_state), dep.version, dep_id.slice(string_state)[0..32],
     }) catch @panic("OOM");
