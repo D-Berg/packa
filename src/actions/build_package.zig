@@ -296,11 +296,9 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
         return 2;
     }
 
-    const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
-        lua.pushNil();
-        _ = lua.pushLString("null userdata");
-        return 2;
-    };
+    const ud = lua.toUserdata(lua.upvalueIndex(1));
+    assert(ud != null);
+
     const env_map: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
 
     const key = lua.toLString(1);
@@ -326,11 +324,9 @@ fn luaEnvGet(state: ?*zlua.LuaState) callconv(.c) c_int {
         return 2;
     }
 
-    const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
-        lua.pushNil();
-        _ = lua.pushLString("null userdata");
-        return 2;
-    };
+    const ud = lua.toUserdata(lua.upvalueIndex(1));
+    assert(ud != null);
+
     const env_map: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
 
     const key = lua.toString(1);
@@ -351,11 +347,9 @@ fn luaEnvAppend(state: ?*zlua.LuaState) callconv(.c) c_int {
         return 2;
     }
 
-    const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
-        lua.pushNil();
-        _ = lua.pushLString("null userdata");
-        return 2;
-    };
+    const ud = lua.toUserdata(lua.upvalueIndex(1));
+    assert(ud != null);
+
     const env: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
 
     const key = lua.toLString(1);
@@ -391,7 +385,10 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
         return 2;
     }
 
-    const ctx: *const RunContext = @ptrCast(@alignCast(lua.toUserdata(lua.upvalueIndex(1))));
+    const ud = lua.toUserdata(lua.upvalueIndex(1));
+    assert(ud != null);
+
+    const ctx: *const RunContext = @ptrCast(@alignCast(ud));
 
     var scratch_arena: std.heap.ArenaAllocator = .init(ctx.gpa);
     defer scratch_arena.deinit();
@@ -508,7 +505,10 @@ const DepContext = struct {
 fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
 
-    const ctx: *const DepContext = @ptrCast(@alignCast(lua.toUserdata(lua.upvalueIndex(1))));
+    const ud = lua.toUserdata(lua.upvalueIndex(1));
+    assert(ud != null);
+
+    const ctx: *const DepContext = @ptrCast(@alignCast(ud));
     var arena_impl: std.heap.ArenaAllocator = .init(ctx.gpa);
     defer arena_impl.deinit();
 
@@ -572,9 +572,14 @@ fn luaDep(state: ?*zlua.LuaState) callconv(.c) c_int {
 const PathJoinContext = struct {
     gpa: Allocator,
 };
+
 fn luaPathJoin(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
-    const ctx: *const PathJoinContext = @ptrCast(@alignCast(lua.toUserdata(lua.upvalueIndex(1))));
+
+    const ud = lua.toUserdata(lua.upvalueIndex(1));
+    assert(ud != null);
+
+    const ctx: *const PathJoinContext = @ptrCast(@alignCast(ud));
 
     const argc: usize = @intCast(lua.getTop());
 
