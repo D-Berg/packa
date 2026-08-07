@@ -87,6 +87,18 @@ fn printInfo(
 
     try t.writer.print("{s}\n\n", .{pkg.desc.slice(&state.string_state)});
 
+    var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "/opt/packa/store/{s}-{f}-{s}", .{
+        pkg.name.slice(&state.string_state), pkg.version, pkg_id.slice(&state.string_state)[0..32],
+    });
+
+    // TODO: improve message
+    if (Io.Dir.cwd().access(io, path, .{})) {
+        try t.setColor(.green);
+        try t.writer.print("Exists in store\n", .{});
+        try t.setColor(.reset);
+    } else |_| {}
+
     try t.writer.print("{s:<10}", .{"Homepage:"});
     try t.writer.print("\x1b[4m", .{}); // underline
     try t.writer.print("{s}\n", .{pkg.homepage.slice(&state.string_state)});
@@ -105,7 +117,6 @@ fn printInfo(
 
     if (pkg.compile_deps.count != 0 or pkg.runtime_deps.count != 0) {
         try t.writer.print("{s:<10}{s}\n", .{ "Deps:", "compile(◆), runtime(●)" });
-        var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
         try printDeps(io, t, pkg_id, state, 0, 0, &path_buf);
     }
 }
