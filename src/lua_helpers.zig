@@ -1,6 +1,7 @@
 const std = @import("std");
 const zlua = @import("zlua");
 const builtin = @import("builtin");
+const assert = std.debug.assert;
 
 pub fn lua_pkg(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
@@ -36,7 +37,7 @@ pub fn pushChecked(
     native: zlua.CFunction,
     context: ?*anyopaque,
 ) !void {
-    std.debug.assert(lua.getField(zlua.REGISTRYINDEX, "packa.checked") == .function);
+    assert(lua.getField(zlua.REGISTRYINDEX, "packa.checked") == .function);
 
     var upvalues: usize = 0;
     if (context) |ctx| {
@@ -53,7 +54,11 @@ const TestContext = struct {
 
 fn testFailure(state: ?*zlua.LuaState) callconv(.c) c_int {
     const lua: zlua.State = .{ .inner = state.? };
-    const context: *TestContext = @ptrCast(@alignCast(lua.toUserdata(lua.upvalueIndex(1))));
+
+    const ud = lua.toUserdata(lua.upvalueIndex(1));
+    assert(ud != null);
+
+    const context: *TestContext = @ptrCast(@alignCast(ud));
     defer context.cleaned = true;
 
     lua.pushNil();
