@@ -53,5 +53,5 @@ fn fastExit(status: u8) void {
 }
 
 test {
-    _ = @import("string.zig");
+    std.testing.refAllDecls(@This());
 }
