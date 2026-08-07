@@ -97,7 +97,10 @@ pub const State = struct {
         };
     }
 
-    pub fn deinit(self: *State, gpa: Allocator) void {
+    pub fn deinit(self: *State, gpa: Allocator, lua: *const zlua.State) void {
+        for (self.packages.items(.build_func_ref)) |build_ref| {
+            lua.unref(zlua.REGISTRYINDEX, build_ref);
+        }
         self.package_table.deinit(gpa);
         self.string_state.deinit(gpa);
         self.packages.deinit(gpa);
@@ -119,8 +122,8 @@ id: Id = .none,
 /// name of Package
 name: String,
 version: std.SemanticVersion,
-/// Lua stack index of pkg from manifest
-lua_idx: i32,
+/// Lua registry reference to the package's build function
+build_func_ref: zlua.Idx,
 desc: String,
 homepage: String,
 license: String,
@@ -222,8 +225,14 @@ pub fn init(
     });
     lua.pop(1);
 
-    if (lua.getField(pkg, "build") != .function) return error.WrongLuaType;
-    lua.pop(1);
+    const build_func_ref = switch (lua.getField(pkg, "build")) {
+        .function => lua.ref(zlua.REGISTRYINDEX), // pops build
+        else => |kind| {
+            log.err("Package expected build to be a function, got {t}", .{kind});
+            return error.WrongLuaType;
+        },
+    };
+    errdefer lua.unref(zlua.REGISTRYINDEX, build_func_ref);
 
     var runtime_deps: Deps = .{ .start = 0, .count = 0 };
     var compile_deps: Deps = .{ .start = 0, .count = 0 };
@@ -295,7 +304,7 @@ pub fn init(
         .desc = desc,
         .homepage = homepage,
         .license = license,
-        .lua_idx = pkg,
+        .build_func_ref = build_func_ref,
         .compile_deps = compile_deps,
         .runtime_deps = runtime_deps,
     };

@@ -42,6 +42,8 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     try lua_helpers.setupState(&lua);
 
     var state: Package.State = .empty;
+    defer state.deinit(arena, &lua);
+
     const pkg_id = try Package.collect(io, arena, &state, packa_dir, args.package_name, &lua, true);
     // TODO: fetch and install deps
 
@@ -99,13 +101,8 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     };
     defer tar_root_dir.close(io);
 
-    switch (lua.getField(pkg.lua_idx, "build")) {
-        .function => {},
-        else => |kind| {
-            log.err("Expected build to be a function, got {t}", .{kind});
-            return error.WrongLuaType;
-        },
-    }
+    // Push package build func to stack for calling
+    assert(lua.rawGetI(zlua.REGISTRYINDEX, pkg.build_func_ref) == .function);
 
     // create b = Build{}
     lua.createTable(0, 8);
