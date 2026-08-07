@@ -53,7 +53,7 @@ pub fn info(io: Io, gpa: Allocator, package_name: []const u8) !void {
     try lua_helpers.setupState(&lua);
 
     var state: Package.State = .empty;
-    defer state.deinit(gpa);
+    defer state.deinit(gpa, &lua);
 
     const pkg_id = try Package.collect(io, gpa, &state, packa_dir, package_name, &lua, false);
 

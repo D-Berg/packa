@@ -71,7 +71,7 @@ pub fn install(
     try lua_helpers.setupState(&lua);
 
     var state: Package.State = .empty;
-    defer state.deinit(gpa);
+    defer state.deinit(gpa, &lua);
 
     var package_ids: std.ArrayList(Package.Id) = try .initCapacity(gpa, args.package_names.len);
     defer package_ids.deinit(gpa);
