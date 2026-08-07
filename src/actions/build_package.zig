@@ -39,7 +39,7 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
     try lua.new(0);
     defer lua.close();
 
-    lua_helpers.setupState(&lua);
+    try lua_helpers.setupState(&lua);
 
     var state: Package.State = .empty;
     const pkg_id = try Package.collect(io, arena, &state, packa_dir, args.package_name, &lua, true);
@@ -154,8 +154,11 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
         .verbose = args.verbose,
     };
     { // b.run = luaRun
-        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&run_ctx))));
-        lua.pushCClosure(luaRun, 1);
+        try lua_helpers.pushChecked(
+            &lua,
+            luaRun,
+            @ptrCast(@alignCast(@constCast(&run_ctx))),
+        );
         lua.setField(b, "run");
     }
 
@@ -166,30 +169,33 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
         .pkg_state = &state,
     };
     {
-        lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&dep_ctx))));
-        lua.pushCClosure(luaDep, 1);
+        try lua_helpers.pushChecked(
+            &lua,
+            luaDep,
+            @ptrCast(@alignCast(@constCast(&dep_ctx))),
+        );
         lua.setField(b, "dep");
     }
 
     const join_ctx: PathJoinContext = .{ .gpa = gpa };
-    lua.pushLightUserdata(@ptrCast(@alignCast(@constCast(&join_ctx))));
-    lua.pushCClosure(luaPathJoin, 1);
+    try lua_helpers.pushChecked(
+        &lua,
+        luaPathJoin,
+        @ptrCast(@alignCast(@constCast(&join_ctx))),
+    );
     lua.setField(b, "pathJoin");
 
     { // b.env = env;
         lua.createTable(0, 3);
         const env_table = lua.getTop();
 
-        lua.pushLightUserdata(@ptrCast(@alignCast(&build_env)));
-        lua.pushCClosure(luaEnvSet, 1);
+        try lua_helpers.pushChecked(&lua, luaEnvSet, @ptrCast(@alignCast(&build_env)));
         lua.setField(env_table, "set");
 
-        lua.pushLightUserdata(@ptrCast(@alignCast(&build_env)));
-        lua.pushCClosure(luaEnvGet, 1);
+        try lua_helpers.pushChecked(&lua, luaEnvGet, @ptrCast(@alignCast(&build_env)));
         lua.setField(env_table, "get");
 
-        lua.pushLightUserdata(@ptrCast(@alignCast(&build_env)));
-        lua.pushCClosure(luaEnvAppend, 1);
+        try lua_helpers.pushChecked(&lua, luaEnvAppend, @ptrCast(@alignCast(&build_env)));
         lua.setField(env_table, "append");
 
         lua.setField(b, "env");
@@ -291,7 +297,7 @@ fn luaEnvSet(state: ?*zlua.LuaState) callconv(.c) c_int {
     }
 
     const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
-        lua.pushBoolean(false);
+        lua.pushNil();
         _ = lua.pushLString("null userdata");
         return 2;
     };
@@ -321,13 +327,13 @@ fn luaEnvGet(state: ?*zlua.LuaState) callconv(.c) c_int {
     }
 
     const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
-        lua.pushBoolean(false);
+        lua.pushNil();
         _ = lua.pushLString("null userdata");
         return 2;
     };
     const env_map: *std.process.Environ.Map = @ptrCast(@alignCast(ud));
 
-    const key = lua.toLString(1);
+    const key = lua.toString(1);
     if (env_map.get(key)) |val| {
         _ = lua.pushLString(val);
         return 1;
@@ -346,7 +352,7 @@ fn luaEnvAppend(state: ?*zlua.LuaState) callconv(.c) c_int {
     }
 
     const ud = lua.toUserdata(lua.upvalueIndex(1)) orelse {
-        lua.pushBoolean(false);
+        lua.pushNil();
         _ = lua.pushLString("null userdata");
         return 2;
     };
@@ -381,7 +387,7 @@ fn luaRun(state: ?*zlua.LuaState) callconv(.c) c_int {
     const n_args: usize = @intCast(lua.getTop());
     if (n_args < 1) {
         lua.pushNil();
-        _ = lua.pushLString("run requires atleast 1 arg");
+        _ = lua.pushLString("run requires atleast 1 argument");
         return 2;
     }
 

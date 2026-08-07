@@ -50,7 +50,7 @@ pub fn info(io: Io, gpa: Allocator, package_name: []const u8) !void {
     try lua.new(0);
     defer lua.close();
 
-    lua_helpers.setupState(&lua);
+    try lua_helpers.setupState(&lua);
 
     var state: Package.State = .empty;
     defer state.deinit(gpa);
