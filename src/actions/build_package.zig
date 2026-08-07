@@ -61,14 +61,16 @@ pub fn build(io: Io, gpa: Allocator, arena: Allocator, env: *std.process.Environ
             dep_name, dep.version, dep_key[0..32],
         });
 
-        Io.Dir.cwd().access(io, store_path, .{}) catch {
+        if (Io.Dir.cwd().access(io, store_path, .{})) {
+            log.debug("Dependency '{s}-{f}' already present in store, skipping build", .{ dep_name, dep.version });
+        } else |_| {
             log.info("Building dependency {s}-{f}", .{ dep_name, dep.version });
             try build(io, gpa, arena, env, .{
                 .package_name = dep_name,
                 .prefix_path = "/opt/packa/tmp",
                 .verbose = args.verbose,
             });
-        };
+        }
     }
 
     const build_dir_path = try std.fmt.allocPrint(arena, "build-{s}-{f}", .{
