@@ -27,14 +27,75 @@ const Package = @This();
 /// Rules:
 ///     - no element in array or hashmap are allowed to hold pointers (ArrayList and HashMaps are also pointers).
 pub const State = struct {
+    /// Maps each unique `Package.ID` to its entry in `packages`.
     package_table: std.AutoArrayHashMapUnmanaged(Id, Package.Idx) = .empty,
+    /// Owns the interned strings referenced by packages and dependencies.
     string_state: string.State = .empty,
+    /// Append-only package storage; duplicate packages may share an ID.
     packages: std.MultiArrayList(Package) = .empty,
+    /// Contiguous storage addressed by each package's dependency ranges.
     dependencies: std.ArrayList(Dependency) = .empty,
 
     pub const empty = State{};
 
-    // TODO: make wrapper api to minimize fault use.
+    pub const DependencyKind = enum { compile, runtime };
+
+    pub const Entry = struct {
+        package: Package,
+    };
+
+    pub const Iterator = struct {
+        packages_slice: std.MultiArrayList(Package).Slice,
+        table_iterator: std.AutoArrayHashMapUnmanaged(Id, Package.Idx).Iterator,
+
+        pub fn next(self: *Iterator) ?Package {
+            const entry = self.table_iterator.next() orelse return null;
+            assert(entry.key_ptr.* != .none);
+            const index = @intFromEnum(entry.value_ptr.*);
+            assert(index < self.packages_slice.len);
+            const package = self.packages_slice.get(index);
+            assert(package.id == entry.key_ptr.*);
+            return package;
+        }
+    };
+
+    pub fn get(self: *const State, id: Id) ?Package {
+        assert(id != .none);
+        const index = self.package_table.get(id) orelse return null;
+        const package_index = @intFromEnum(index);
+        assert(package_index < self.packages.len);
+        const package = self.packages.get(package_index);
+        assert(package.id == id);
+        return package;
+    }
+
+    pub fn getDependencies(self: *const State, package: Package, kind: DependencyKind) []const Dependency {
+        const deps = switch (kind) {
+            .compile => package.compile_deps,
+            .runtime => package.runtime_deps,
+        };
+        const start: usize = deps.start;
+        const dependency_count: usize = deps.count;
+        assert(package.id != .none);
+        assert(start <= self.dependencies.items.len);
+        assert(dependency_count <= self.dependencies.items.len - start);
+        return self.dependencies.items[start..][0..dependency_count];
+    }
+
+    pub fn count(self: *const State) usize {
+        assert(self.package_table.count() <= self.packages.len);
+        return self.package_table.count();
+    }
+
+    /// Iterate over Packages.
+    /// It is not safe to mofify state while iterating
+    pub fn iterator(self: *const State) Iterator {
+        assert(self.package_table.count() <= self.packages.len);
+        return .{
+            .packages_slice = self.packages.slice(),
+            .table_iterator = self.package_table.iterator(),
+        };
+    }
 
     pub fn deinit(self: *State, gpa: Allocator) void {
         self.package_table.deinit(gpa);
@@ -50,11 +111,15 @@ pub const Dependency = struct {
 };
 /// Unique hash(Id) of a Package by hashing OS, cpu Arch, manifests and dependecies manifests.
 pub const Id = String;
-/// idx into State.packages
+/// Index into State.packages
 pub const Idx = enum(u32) { _ };
 
+/// Unique package id generated from hashing build input
+id: Id = .none,
+/// name of Package
 name: String,
 version: std.SemanticVersion,
+/// Lua stack index of pkg from manifest
 lua_idx: i32,
 desc: String,
 homepage: String,
@@ -117,7 +182,7 @@ pub fn init(
     lua.pop(1);
 
     if (!std.mem.eql(u8, pkg_name, name.slice(&state.string_state))) {
-        log.err("Name differs", .{});
+        log.err("Package name differs from expected name '{s}', got {s}", .{ pkg_name, name.slice(&state.string_state) });
         return error.WrontPackageName;
     }
 
@@ -220,6 +285,7 @@ pub fn init(
     }
     pop_count += 1; // deps
     lua.pop(pop_count);
+    lua.pop(1); // package
 
     return .{
         .name = name,
@@ -250,11 +316,9 @@ pub fn collect(
     var blake3: std.crypto.hash.Blake3 = .init(.{ .key = null });
 
     try state.packages.ensureUnusedCapacity(gpa, 1);
+    const package = try Package.init(io, gpa, state, packa_dir, "core", name, lua, &blake3);
     const pkg_idx = state.packages.addOneAssumeCapacity();
-    state.packages.set(
-        pkg_idx,
-        try .init(io, gpa, state, packa_dir, "core", name, lua, &blake3),
-    );
+    state.packages.set(pkg_idx, package);
     state.packages.items(.install)[pkg_idx] = install;
 
     const runtime_deps: Deps = state.packages.items(.runtime_deps)[pkg_idx];
@@ -289,5 +353,6 @@ pub fn collect(
         assert(names[@intFromEnum(gop.value_ptr.*)] == names[pkg_idx]);
     }
     gop.value_ptr.* = @enumFromInt(pkg_idx);
+    state.packages.items(.id)[pkg_idx] = key_string;
     return key_string;
 }

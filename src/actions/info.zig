@@ -79,7 +79,7 @@ fn printInfo(
     pkg_id: Package.Id,
     state: *const Package.State,
 ) !void {
-    const pkg = state.packages.get(@intFromEnum(state.package_table.get(pkg_id).?));
+    const pkg = state.get(pkg_id) orelse return error.MissingPackageIdx;
 
     try t.setColor(.bold);
     try t.writer.print("{s}-{f}\n", .{ pkg.name.slice(&state.string_state), pkg.version });
@@ -130,9 +130,9 @@ fn printDeps(
     pipes: u64,
     path_buf: []u8,
 ) !void {
-    const pkg = state.packages.get(@intFromEnum(state.package_table.get(pkg_id).?));
-    const comp_deps = state.dependencies.items[pkg.compile_deps.start..][0..pkg.compile_deps.count];
-    const run_deps = state.dependencies.items[pkg.runtime_deps.start..][0..pkg.runtime_deps.count];
+    const pkg = state.get(pkg_id) orelse return error.MissingPackageIdx;
+    const comp_deps = state.getDependencies(pkg, .compile);
+    const run_deps = state.getDependencies(pkg, .runtime);
     const total = comp_deps.len + run_deps.len;
 
     for (0..total) |i| {
@@ -140,7 +140,7 @@ fn printDeps(
         const dep = if (is_comp) comp_deps[i] else run_deps[i - comp_deps.len];
         const is_last = (i == total - 1);
 
-        const dep_pkg = state.packages.get(@intFromEnum(state.package_table.get(dep.pkg_id).?));
+        const dep_pkg = state.get(dep.pkg_id) orelse return error.MissingPackageIdx;
 
         for (0..level) |l| {
             const pipe = if ((pipes >> @intCast(l)) & 1 == 1) "│  " else "   ";

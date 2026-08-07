@@ -90,8 +90,7 @@ pub fn install(
     try fetchPackages(io, gpa, cache_dir, &state, &pub_key, progress);
 
     for (package_ids.items) |id| {
-        const idx = state.package_table.get(id) orelse return error.MissingPackageIdx;
-        const pkg = state.packages.get(@intFromEnum(idx));
+        const pkg = state.get(id) orelse return error.MissingPackageIdx;
         // TODO: install runtime deps first recursively
         // for (pkg.runtime_deps.items) |dep_id| {}
         //
@@ -110,7 +109,7 @@ fn fetchPackages(
     pub_key: *const minizign.PublicKey,
     progress: std.Progress.Node,
 ) !void {
-    const package_count = resolved.package_table.count();
+    const package_count = resolved.count();
 
     var fetch_progress = progress.start("fetching", package_count);
     defer fetch_progress.end();
@@ -125,21 +124,18 @@ fn fetchPackages(
     var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
 
     var fetch_count: usize = 0;
-    const pkg_slice = resolved.packages.slice();
-    var it = resolved.package_table.iterator();
-    while (it.next()) |entry| {
-        const pkg_id = entry.key_ptr.*;
-        const pkg_idx = entry.value_ptr.*;
-        const name = pkg_slice.items(.name)[@intFromEnum(pkg_idx)];
-        const version = pkg_slice.items(.version)[@intFromEnum(pkg_idx)];
+    var it = resolved.iterator();
+    while (it.next()) |pkg| {
+        const pkg_id = pkg.id;
+        const name = pkg.name;
+        const version = pkg.version;
 
         const path = try std.fmt.bufPrint(&path_buf, "{s}-{f}-{s}.tar.zst", .{
             name.slice(&resolved.string_state), version, pkg_id.slice(&resolved.string_state)[0..32],
         });
         cahce_dir.access(io, path, .{}) catch {
-            // try fetchPackage(io, gpa, pkg_id, pkg_idx, pkg_slice, &resolved.string_state, &queue, pub_key, fetch_progress);
             group.async(io, fetchPackage, .{
-                io, gpa, pkg_id, pkg_idx, pkg_slice, &resolved.string_state, &queue, pub_key, fetch_progress,
+                io, gpa, pkg_id, pkg, &resolved.string_state, &queue, pub_key, fetch_progress,
             });
             fetch_count += 1;
             continue;
@@ -165,16 +161,15 @@ fn fetchPackage(
     io: Io,
     gpa: Allocator,
     pkg_id: Package.Id,
-    pkg_idx: Package.Idx,
-    packages_slice: std.MultiArrayList(Package).Slice,
+    pkg: Package,
     string_state: *const string.State,
     queue: *Io.Queue(anyerror!void),
     pub_key: *const minizign.PublicKey,
     progress: std.Progress.Node,
 ) Io.Cancelable!void {
-    const name = packages_slice.items(.name)[@intFromEnum(pkg_idx)];
+    const name = pkg.name;
     const name_slice = name.slice(string_state);
-    const version = packages_slice.items(.version)[@intFromEnum(pkg_idx)];
+    const version = pkg.version;
     const pkg_id_slice = pkg_id.slice(string_state);
 
     defer std.debug.print("finished downloading {s}\n", .{name_slice});
