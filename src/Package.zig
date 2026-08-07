@@ -65,6 +65,7 @@ pub const State = struct {
 
         const package_index = @intFromEnum(index);
         assert(package_index < self.packages.len);
+
         const package = self.packages.get(package_index);
         assert(package.id == id);
         return package;
@@ -151,6 +152,7 @@ pub fn init(
 ) !Package {
     assert(pkg_name.len > 0);
     assert(repo.len > 0);
+
     var arena_impl: std.heap.ArenaAllocator = .init(gpa);
     defer arena_impl.deinit();
 
@@ -162,6 +164,7 @@ pub fn init(
         pkg_name,
     }, 0);
     const manifest_stat = try packa_dir.statFile(io, manifest_path[1..], .{ .follow_symlinks = true });
+
     const manifest = try packa_dir.readFileAllocOptions(
         io,
         manifest_path[1..],
@@ -186,18 +189,24 @@ pub fn init(
     // TODO: log errors
     const name = try state.string_state.internString(gpa, switch (lua.getField(pkg, "name")) {
         .string => lua.toLString(-1),
-        else => return error.WrongLuaType,
+        else => |kind| {
+            log.err("Package expected name to be function, got {t}", .{kind});
+            return error.WrongLuaType;
+        },
     });
     lua.pop(1);
 
     if (!std.mem.eql(u8, pkg_name, name.slice(&state.string_state))) {
         log.err("Package name differs from expected name '{s}', got {s}", .{ pkg_name, name.slice(&state.string_state) });
-        return error.WrontPackageName;
+        return error.WrongPackageName;
     }
 
     const version: std.SemanticVersion = try .parse(switch (lua.getField(pkg, "version")) {
         .string => lua.toLString(-1),
-        else => return error.WrongLuaType,
+        else => |kind| {
+            log.err("Package expected type of version to be string, got {t}", .{kind});
+            return error.WrongLuaType;
+        },
     });
     lua.pop(1);
 
