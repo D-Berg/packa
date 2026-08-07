@@ -62,6 +62,7 @@ pub const State = struct {
     pub fn get(self: *const State, id: Id) ?Package {
         assert(id != .none);
         const index = self.package_table.get(id) orelse return null;
+
         const package_index = @intFromEnum(index);
         assert(package_index < self.packages.len);
         const package = self.packages.get(package_index);
@@ -150,20 +151,25 @@ pub fn init(
 ) !Package {
     assert(pkg_name.len > 0);
     assert(repo.len > 0);
-    var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
-    const manifest_path = try std.fmt.bufPrintZ(&path_buf, "@/opt/packa/repos/{s}/manifests/{c}/{s}.lua", .{
-        repo, pkg_name[0], pkg_name,
-    });
+    var arena_impl: std.heap.ArenaAllocator = .init(gpa);
+    defer arena_impl.deinit();
+
+    const arena = arena_impl.allocator();
+
+    const manifest_path = try std.fmt.allocPrintSentinel(arena, "@/opt/packa/repos/{s}/manifests/{c}/{s}.lua", .{
+        repo,
+        pkg_name[0],
+        pkg_name,
+    }, 0);
     const manifest_stat = try packa_dir.statFile(io, manifest_path[1..], .{ .follow_symlinks = true });
     const manifest = try packa_dir.readFileAllocOptions(
         io,
         manifest_path[1..],
-        gpa,
-        .limited64(manifest_stat.size + 1),
+        arena,
+        .limited64(manifest_stat.size + 1), // zero sentinel
         .of(u8),
         0,
     );
-    defer gpa.free(manifest);
 
     if (hash) |h| {
         h.update(manifest);
