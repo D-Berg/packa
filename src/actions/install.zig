@@ -18,6 +18,17 @@ const lua_helpers = @import("../lua_helpers.zig");
 const assert = std.debug.assert;
 const log = std.log.scoped(.install);
 
+pub const ResolvedPackage = struct {
+    name: []const u8,
+    version: []const u8,
+    id: []const u8,
+};
+
+pub const ShellInstall = struct {
+    bin_paths: []const []const u8,
+    packages: []const ResolvedPackage,
+};
+
 pub fn install(
     io: Io,
     gpa: Allocator,
@@ -25,8 +36,28 @@ pub fn install(
     progress: std.Progress.Node,
     args: cli.InstallArgs,
 ) !void {
+    _ = try installImpl(io, gpa, arena, progress, args, false);
+}
+
+pub fn installForShell(
+    io: Io,
+    gpa: Allocator,
+    arena: Allocator,
+    progress: std.Progress.Node,
+    args: cli.InstallArgs,
+) !ShellInstall {
+    return installImpl(io, gpa, arena, progress, args, true);
+}
+
+fn installImpl(
+    io: Io,
+    gpa: Allocator,
+    arena: Allocator,
+    progress: std.Progress.Node,
+    args: cli.InstallArgs,
+    collect_bin_paths: bool,
+) !ShellInstall {
     try util.checkSetup(io);
-    _ = arena;
 
     const packa_dir = try Io.Dir.cwd().openDir(io, "/opt/packa", .{});
     defer packa_dir.close(io);
@@ -73,11 +104,8 @@ pub fn install(
     var state: Package.State = .empty;
     defer state.deinit(gpa);
 
-    var package_ids: std.ArrayList(Package.Id) = try .initCapacity(gpa, args.package_names.len);
-    defer package_ids.deinit(gpa);
-
     for (args.package_names) |name| {
-        package_ids.appendAssumeCapacity(try Package.collect(io, gpa, &state, packa_dir, name, &lua, true));
+        _ = try Package.collect(io, gpa, &state, packa_dir, name, &lua, true);
     }
 
     const store_dir = try packa_dir.openDir(io, "store", .{});
@@ -89,17 +117,40 @@ pub fn install(
 
     try fetchPackages(io, gpa, cache_dir, &state, &pub_key, progress);
 
-    for (package_ids.items) |id| {
-        const idx = state.package_table.get(id) orelse return error.MissingPackageIdx;
+    var bin_paths: std.ArrayList([]const u8) = .empty;
+    var resolved_packages: std.ArrayList(ResolvedPackage) = .empty;
+    var package_it = state.package_table.iterator();
+    while (package_it.next()) |entry| {
+        const id = entry.key_ptr.*;
+        const idx = entry.value_ptr.*;
         const pkg = state.packages.get(@intFromEnum(idx));
-        // TODO: install runtime deps first recursively
-        // for (pkg.runtime_deps.items) |dep_id| {}
-        //
+        if (!pkg.install) continue;
 
-        try installPackage(io, gpa, &pkg, id, &state.string_state, store_dir, cache_dir);
+        try installPackage(io, gpa, &pkg, id, &state.string_state, store_dir, cache_dir, args.link_global);
+        if (collect_bin_paths) {
+            try bin_paths.append(arena, try std.fmt.allocPrint(arena, "/opt/packa/store/{s}-{f}-{s}/bin", .{
+                pkg.name.slice(&state.string_state), pkg.version, id.slice(&state.string_state)[0..32],
+            }));
+            try resolved_packages.append(arena, .{
+                .name = try arena.dupe(u8, pkg.name.slice(&state.string_state)),
+                .version = try std.fmt.allocPrint(arena, "{f}", .{pkg.version}),
+                .id = try arena.dupe(u8, id.slice(&state.string_state)),
+            });
+        }
     }
 
     log.debug("finished installing\n", .{});
+    const packages = try resolved_packages.toOwnedSlice(arena);
+    std.mem.sort(ResolvedPackage, packages, {}, struct {
+        fn lessThan(_: void, a: ResolvedPackage, b: ResolvedPackage) bool {
+            const name_order = std.mem.order(u8, a.name, b.name);
+            return name_order == .lt or (name_order == .eq and std.mem.lessThan(u8, a.id, b.id));
+        }
+    }.lessThan);
+    return .{
+        .bin_paths = try bin_paths.toOwnedSlice(arena),
+        .packages = packages,
+    };
 }
 
 fn fetchPackages(
@@ -196,6 +247,7 @@ fn installPackage(
     string_state: *const string.State,
     store_dir: Io.Dir,
     cache_dir: Io.Dir,
+    link_global: bool,
 ) !void {
     var archive_name_buf: [Io.Dir.max_path_bytes]u8 = undefined;
 
@@ -205,20 +257,26 @@ fn installPackage(
         pkg_name, pkg.version, id.slice(string_state)[0..32],
     });
 
+    var root_name_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const expected_root = try std.fmt.bufPrint(&root_name_buf, "{s}-{f}-{s}", .{
+        pkg_name, pkg.version, id.slice(string_state)[0..32],
+    });
+
     std.debug.print("{s}\n", .{archive_path});
+    const root = root: {
+        store_dir.access(io, expected_root, .{}) catch {
+            const archive = try cache_dir.openFile(io, archive_path, .{});
+            defer archive.close(io);
 
-    const archive = try cache_dir.openFile(io, archive_path, .{});
-    defer archive.close(io);
-
-    var archive_reader_buf: [16_392]u8 = undefined;
-    var archive_reader = archive.reader(io, &archive_reader_buf);
-
-    const root = try util.extractArchive(io, gpa, &archive_reader.interface, store_dir, .zst);
+            var archive_reader_buf: [16_392]u8 = undefined;
+            var archive_reader = archive.reader(io, &archive_reader_buf);
+            break :root try util.extractArchive(io, gpa, &archive_reader.interface, store_dir, .zst);
+        };
+        break :root try gpa.dupe(u8, expected_root);
+    };
     defer gpa.free(root);
 
-    try store_dir.access(io, root, .{});
-
-    if (pkg.install) {
+    if (link_global) {
         // TODO: link if
         // - man
         // - libs

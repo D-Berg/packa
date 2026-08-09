@@ -17,6 +17,8 @@ pub const usage =
     \\Commands:
     \\
     \\  install          Install a pre-built package
+    \\  apply            Apply ~/.config/packa/init.lua
+    \\  shell            Enter a development shell from ./packa.lua
     \\  build            Build a package from source
     \\  info             Print info of package and exit
     \\  setup            Setup packa in /opt/packa 
@@ -35,13 +37,15 @@ pub const Command = union(enum) {
     setup,
     info: []const u8,
     gc,
+    apply: ApplyArgs,
+    shell: ShellArgs,
 
     pub fn deinit(self: *Command, gpa: Allocator) void {
         switch (self.*) {
             .install => |install| {
                 gpa.free(install.package_names);
             },
-            .help, .build, .version, .setup, .info => {},
+            .help, .build, .version, .setup, .info, .gc, .apply, .shell => {},
         }
     }
 };
@@ -94,6 +98,10 @@ pub fn parse(gpa: Allocator, args: []const []const u8, diag: ?*Diagnostic) !Comm
         return try parseInfoArgs(&arg_it);
     } else if (eql(arg, "gc")) {
         return .gc;
+    } else if (eql(arg, "apply")) {
+        return try parseApplyArgs(&arg_it);
+    } else if (eql(arg, "shell")) {
+        return try parseShellArgs(&arg_it);
     } else if (eql(arg, "-h") or eql(arg, "--help")) {
         return .{ .help = usage };
     }
@@ -105,6 +113,7 @@ pub const InstallArgs = struct {
     package_names: []const []const u8,
     approved: bool,
     build_from_source: bool,
+    link_global: bool = true,
 };
 fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
     var approved: bool = false;
@@ -129,9 +138,45 @@ fn parseInstallArgs(args: *ArgIterator, gpa: Allocator) !Command {
 
     return .{ .install = .{
         .package_names = try package_names.toOwnedSlice(gpa),
-        .build_from_source = true,
+        .build_from_source = build_from_source,
         .approved = approved,
     } };
+}
+
+pub const ApplyArgs = struct {
+    config_path: ?[]const u8 = null,
+    approved: bool = false,
+};
+
+fn parseApplyArgs(args: *ArgIterator) !Command {
+    var result: ApplyArgs = .{};
+    while (args.next()) |arg| {
+        if (eql(arg, "--config")) {
+            result.config_path = args.next() orelse return error.ApplyMissingConfigPath;
+        } else if (eql(arg, "-y") or eql(arg, "--yes")) {
+            result.approved = true;
+        } else return error.UnknownApplyArgument;
+    }
+    return .{ .apply = result };
+}
+
+pub const ShellArgs = struct {
+    name: ?[]const u8 = null,
+    update_lock: bool = false,
+};
+
+fn parseShellArgs(args: *ArgIterator) !Command {
+    var result: ShellArgs = .{};
+    while (args.next()) |arg| {
+        if (eql(arg, "--update")) {
+            result.update_lock = true;
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            return error.UnknownShellArgument;
+        } else if (result.name == null) {
+            result.name = arg;
+        } else return error.TooManyShellArguments;
+    }
+    return .{ .shell = result };
 }
 
 const build_usage =

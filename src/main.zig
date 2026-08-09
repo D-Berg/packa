@@ -40,6 +40,14 @@ pub fn main(init: std.process.Init) !void {
             fastExit(1);
             return err;
         },
+        .apply => |apply_args| actions.apply(init.io, init.gpa, arena, progress, init.environ_map, apply_args) catch |err| {
+            fastExit(1);
+            return err;
+        },
+        .shell => |shell_args| actions.shell(init.io, init.gpa, arena, progress, init.environ_map, shell_args) catch |err| {
+            fastExit(1);
+            return err;
+        },
     }
     fastExit(0);
 }
@@ -54,4 +62,6 @@ fn fastExit(status: u8) void {
 
 test {
     _ = @import("string.zig");
+    _ = @import("Config.zig");
+    _ = @import("Lock.zig");
 }
